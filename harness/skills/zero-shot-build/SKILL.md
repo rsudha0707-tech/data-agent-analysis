@@ -17,9 +17,7 @@ Intake has **two fixed sections and a variable middle**:
 1. **Product rounds (variable, minimum 5)** — all product questions, progressively deeper. You keep going until you have resolved every dimension that would force a design decision in Phase 1. Five rounds is the floor; complex ideas may need 6, 7, or more. Each round covers a different dimension and must not repeat covered ground.
 2. **Technical round (fixed, always last)** — one round of build-blockers only (LLM provider, stack, access method).
 
-All rounds use `clarify`; the API key prompt is the only additional manual step. **`clarify` questions are single-select — multi-select is NOT available in Hermes.** Where a multi-select checklist would have let the user tick several options, ask MORE single-select questions instead — one dimension per question, with combined options ("Both A and B") where natural. Always err toward asking more questions rather than cramming choices into one.
-
-**Fallback when `clarify` doesn't load** (it can fail to load when Hermes runs on a plain command line): ask the questions in **plain text, ONE AT A TIME** — ask one question, wait for the user's reply, then ask the next. Never dump a whole round of questions in a single message. Prefer the dynamic `clarify` tool whenever it is available; the plain-text one-by-one flow is only the fallback.
+All rounds use `clarify`; the API key prompt is the only additional manual step.
 
 **How to decide when to stop product rounds:** After each round, ask: *"Is there any dimension — interaction model, state/memory, features, constraints, edge cases, observability, integrations — that, if left unresolved, would force spec-writer to guess?* If yes: write another product round on that dimension. If no: move to the technical round. Err on the side of one more round rather than handing off an ambiguous brief.
 
@@ -35,7 +33,7 @@ All rounds use `clarify`; the API key prompt is the only additional manual step.
 
 1. Acknowledge the idea in one sentence.
 2. Load the question tool: `clarify` with query `select:clarify`.
-3. Ask **4 questions** via `clarify`, single-select each (multi-select is not available — split a dimension into additional questions when one pick can't capture it). Plain, friendly language — no technical jargon. Pure product questions.
+3. Ask **4 questions** via `clarify`, all `multiSelect: true`. Plain, friendly language — no technical jargon. Pure product questions.
 
    Four themes — adapt wording and all options to the idea:
    - **What it works on** *(4 idea-specific options)* — the data, content, or domain it processes. Be concrete: not "documents" but "CSV exports from our CRM", "raw survey responses", "GitHub PR diffs".
@@ -48,7 +46,7 @@ All rounds use `clarify`; the API key prompt is the only additional manual step.
 ### Round 2 — How users interact (4 questions)
 
 4. Read Round 1 answers carefully. You now know the idea category (data analysis, email triage, code review, etc.). Write ALL questions and ALL options for this round as if you are a product designer who has used tools exactly like this.
-5. Load `clarify`. Ask **4 questions**, single-select each (multi-select is not available — split a dimension into additional questions when one pick can't capture it). Cover these four interaction-model dimensions — all options must be specific to the idea:
+5. Load `clarify`. Ask **4 questions**, all `multiSelect: true`. Cover these four interaction-model dimensions — all options must be specific to the idea:
 
    - **Session model** — how long does one "conversation" last? E.g. for a data analyst agent: "I upload a file, ask one question, done", "I upload once and ask many questions in a session", "I return to the same dataset across multiple days", "It runs automatically and I review results".
    - **Memory & state** — what should carry across turns or sessions? E.g. for a data analyst agent: "The conversation history (what I asked before)", "The uploaded datasets stay loaded", "Derived/cleaned datasets I created during the session", "A global context I can annotate (column descriptions, business rules)", "Nothing — fresh start every time".
@@ -62,7 +60,7 @@ All rounds use `clarify`; the API key prompt is the only additional manual step.
 ### Round 3 — Feature depth (4 questions)
 
 6. Read Rounds 1–2. You now know what the agent processes and how users interact with it. This round uncovers what makes the agent genuinely powerful vs. a toy. Write ALL options as idea-specific concrete features — not abstract categories.
-7. Load `clarify`. Ask **4 questions**, single-select each (multi-select is not available — split a dimension into additional questions when one pick can't capture it). Cover these four feature-depth dimensions:
+7. Load `clarify`. Ask **4 questions**, all `multiSelect: true`. Cover these four feature-depth dimensions:
 
    - **Analysis / reasoning depth** — how hard should it work on each request? E.g. for a data analyst agent: "Fast answer — one LLM call, no iteration", "Multi-step reasoning — tries code, sees result, tries again", "Iterative until it finds the right answer (up to N steps)", "Plans a full analysis strategy before executing".
    - **Output richness** — what forms should results take? E.g. for a data analyst agent: "Plain text answer with key numbers", "Interactive charts I can zoom and filter", "A summary table alongside the prose", "An exportable file (CSV, cleaned dataset, report)".
@@ -76,7 +74,7 @@ All rounds use `clarify`; the API key prompt is the only additional manual step.
 ### Round 4 — Constraints & scale (3 questions)
 
 8. Read Rounds 1–3. This round surfaces hard constraints that would invalidate a design decision if missed. Write ALL options as specific, concrete limits — not vague categories.
-9. Load `clarify`. Ask **3 questions**, single-select each (multi-select is not available — split a dimension into additional questions when one pick can't capture it):
+9. Load `clarify`. Ask **3 questions**, all `multiSelect: true`:
 
    - **Data scale & performance** — how much data and how fast? E.g. for a data analyst agent: "Small files, a few MB, latency doesn't matter", "Up to 100 MB CSVs, answer in under 30s", "Millions of rows — needs sampling or streaming", "Multiple users querying concurrently".
    - **Privacy & data residency** — where can data go? Options: "Everything must stay on my machine / our server (no cloud LLM API calls)", "LLM API calls are OK but raw data rows must never leave", "Cloud storage and APIs are fine", "We have compliance requirements (SOC 2, GDPR, HIPAA)".
@@ -87,7 +85,7 @@ All rounds use `clarify`; the API key prompt is the only additional manual step.
 ### Round 5 — Observability, trust & transparency (3–4 questions)
 
 10. Read Rounds 1–4. This round covers what users need to see in order to trust and debug the agent — often skipped but critical for agents that users depend on.
-11. Load `clarify`. Ask **3–4 questions**, single-select each (multi-select is not available — split a dimension into additional questions when one pick can't capture it):
+11. Load `clarify`. Ask **3–4 questions**, all `multiSelect: true`:
 
     - **Reasoning visibility** — should users see how the agent reached its answer? E.g. for a data analyst agent: "No — just show me the answer", "Show me the code it ran (collapsible)", "Show me each step — what it tried, what failed, what worked", "Show me the full reasoning chain".
     - **Usage & cost awareness** — should users know what the agent is spending? E.g. for a data analyst agent: "No — hide this", "Show tokens used per query", "Show estimated cost per query", "Show a running daily total".
@@ -113,21 +111,21 @@ Keep going until the brief you'll write in the synthesis step would let spec-wri
 ### Technical round — What do we need to build it? (3–4 questions, always last)
 
 Read all prior rounds. Now ask the **technical build questions** — only genuine blockers, 3–4 total:
-- **LLM provider** *(single-select)* — offer: **OpenRouter (recommended — one key, any model)**, **Anthropic (API key)**, **Gemini (API key)**, **Other / self-hosted**. OpenRouter is the primary option and the default when the user has no preference. This drives which key the user sets.
+- **LLM provider** *(single-select)* — offer: **Anthropic (API key)**, **Gemini (API key)**, **OpenRouter (any model)**, **Other / self-hosted**. This drives which key the user sets.
 - **Stack preference** — language, database? ("No preference" → Python + SQLite defaults for local/prototype tools, PostgreSQL for production-grade, documented as assumptions.)
 - **How will they access it?** — Web UI in a browser, CLI in the terminal, REST API, scheduled/automated job. Drives whether to build a frontend.
 - **One follow-up** from prior rounds only if something would force a mid-build pause — skip if everything is clear.
 
-**API key** (the only manual user step). Read `.env` and check whether the key for the chosen provider is already set (non-empty): `AGENT_OPENROUTER_API_KEY`, `AGENT_ANTHROPIC_API_KEY`, or `AGENT_GEMINI_API_KEY` (for **Other**, ask which env var + base URL). If present and non-empty, skip silently. Only if missing or empty, tell the user to set it in `.env` (from `.env.example`) and wait for confirmation. Never echo, print, paste, or commit a secret value.
+**API key** (the only manual user step). Read `.env` and check whether the key for the chosen provider is already set (non-empty): `AGENT_ANTHROPIC_API_KEY`, `AGENT_GEMINI_API_KEY`, or `AGENT_OPENROUTER_API_KEY` (for **Other**, ask which env var + base URL). If present and non-empty, skip silently. Only if missing or empty, tell the user to set it in `.env` (from `.env.example`) and wait for confirmation. Never echo, print, paste, or commit a secret value.
 
-**Synthesis brief**: write a **2–3 paragraph brief** covering: what the agent does and who uses it; the core interaction model (session shape, memory/state, multi-item handling); the key capabilities and features (analysis depth, output forms, proactive behaviours, edge-case handling, integrations, observability); the hard constraints (scale, privacy, reliability bar); and the technical stack and access model. Name the one core path for Phase 1 explicitly — the single most important thing a user does that proves the idea. ("Just build it" → narrow MVP, Python + SQLite defaults, OpenRouter provider, documented as assumptions.)
+**Synthesis brief**: write a **2–3 paragraph brief** covering: what the agent does and who uses it; the core interaction model (session shape, memory/state, multi-item handling); the key capabilities and features (analysis depth, output forms, proactive behaviours, edge-case handling, integrations, observability); the hard constraints (scale, privacy, reliability bar); and the technical stack and access model. Name the one core path for Phase 1 explicitly — the single most important thing a user does that proves the idea. ("Just build it" → narrow MVP, Python + SQLite defaults, documented as assumptions.)
 
 ## Stage 2 — Design + scaffold + build Phase 1 (delegate)
 
 Invoke the **agent-builder** sub-agent once with the brief and the populated `.env`. Tell it to run, in order, and return the **Phase-1 test-handoff**:
 
 - **DESIGN** — spec-writer writes the full spec: vision/capabilities, `spec/architecture.md` (incl. the `## Stack` section), `spec/agent.md` (if a framework is chosen), and the phased plan in `spec/roadmap.md` under "## Phases of Development" (per phase: Goal · independent slices · key surfaces/files · the exact runnable Gate command · how the user tests it).
-- **SCAFFOLD** — branch `feature/<slug>-v0.1` (slug must be unique — check `git branch -a` first and add a suffix if taken; see `harness/rules/git.md`), project dirs, `.env.example`, first commit + push, open the PR. Never commit on `main`.
+- **SCAFFOLD** — branch `feature/<slug>-v0.1`, project dirs, `.env.example`, first commit + push, open the PR.
 - **BUILD PHASE 1** — fan out generators per independent slice in parallel, gate each slice with qa-auditor, then return the Phase-1 test-handoff and STOP.
 
 Relay only the hard blockers it escalates (e.g. a required key still missing from `.env`).
@@ -141,18 +139,16 @@ Phase 1 is the smallest working win: real on the one core path, with clearly-lab
    b. If the phase has migrations: `alembic upgrade head`
    c. `venv/bin/python -m src` with `run_in_background: true`
    d. Health-check with retry: `for i in {1..10}; do curl -sf http://localhost:8001/health && break || sleep 2; done` — wait for the server before presenting the gate. If it never responds → route immediately to qa-auditor (boot failure), do not present the URL.
-2. Load the question tool: `clarify` with query `select:clarify` (before asking). If it fails to load, fall back to plain-text questions asked one at a time.
+2. Load the question tool: `clarify` with query `select:clarify` (before asking).
 3. Present the handoff as **phase release notes**: the live URL, what was built this phase, what to click / type / look at, the expected result, which parts are clearly-labelled stubs vs real (a stub must never read as a bug), and what the next phase adds. No run commands in the handoff — the app is already serving.
-4. Ask via `clarify` — **a per-feature checklist, never ONE overall verdict.** Multi-select is NOT
-   available in Hermes, so run the checklist as a SERIES of single-select questions — more questions,
-   not fewer — derived from THIS phase's success criteria:
-   - First: *"Is the app loading at [URL]?"* → **"Yes, I can see it"** / **"No — error or blank page"**
-   - Then ONE question per testable feature the phase shipped (e.g. *"Does the main view render?"*,
-     *"Does the core action work?"*, *"Is the output correct?"*, *"Do feedback/hints work?"*,
-     *"Does streaming work?"*), each → **"Works"** / **"Broken"** / **"Didn't try"**.
-   Asking one question per feature tells you *which* parts passed and *which* failed — a single
-   overall verdict throws that away. If the app didn't load or every feature comes back "Broken",
-   route to qa-auditor.
+4. Ask via `clarify` — **ALWAYS MULTI-SELECT, never a single-choice verdict.** One call, tick all that
+   apply, covering both load-state and a per-feature checklist derived from THIS phase's success criteria:
+   - *"Is the app loading at [URL]?"* → **"Yes, I can see it"** / **"No — error or blank page"**
+   - *"What worked?"* (multiSelect) → one option per testable feature the phase shipped (e.g.
+     **"Main view renders"** / **"Core action works"** / **"Output is correct"** / **"Feedback/hints work"** /
+     **"Streaming works"** / **"Reasoning/usage shown"**), plus a **"Nothing worked"** escape.
+   A multi-select checklist tells you *which* parts passed and *which* failed in one answer — a single
+   verdict throws that away. If "No — error" or "Nothing worked" is ticked, route to qa-auditor.
 5. Route on their answers:
    - App didn't load → qa-auditor (boot failure), fix, re-present.
    - Any negative verdict → capture what they saw, then delegate to **zero-shot-fix** — pass the user's description, the phase context, the live URL, and any qa-auditor diagnosis already in context (file:line + SPEC/CODE classification) so it can skip re-diagnosis. It owns diagnose → fix → verify → commit + push autonomously, using the **scoped gate** for small CODE fixes (qa-auditor verifies only the changed surface + a real-key smoke call — not the full suite/E2E). When it returns VERIFIED, rebuild + restart the running app and **re-present** the gate. Loop until satisfied.
