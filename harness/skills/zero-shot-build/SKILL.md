@@ -244,6 +244,21 @@ They never run a terminal command to test.** You own the server and the gate:
    - All positive → *"Ready for Phase N+1?"* — on "one more thing first", route as negative;
      on yes → Stage 3 for the next phase.
 
+## The build journal (capture learnings as you go)
+
+Maintain **`NOTES.md` on the build's feature branch** throughout the run — commit it with
+each phase. It is a *harness-improvement log*, not an app changelog: record only friction
+with the harness or the runtime, each entry with symptom → what you did → the durable
+lesson. Typical entries: a `clarify` load failure, a delegated worker that returned early,
+a gate that passed for the wrong reason, a rule that fought you, a question the intake
+should have asked. Timestamp the run start (date + time) in the first entry — it lets the
+Hermes execution logs (`~/.hermes/logs/agent.log`, `~/.hermes/sessions/request_dump_*`)
+be sliced to this run afterwards.
+
+After the run, durable generic lessons get distilled into
+`references/hermes-pitfalls.md` (and role files where they change behaviour) via a
+separate harness PR; the war-story details stay behind on the build branch's NOTES.md.
+
 ## Stage 5 — Ship + report
 
 1. **qa-auditor** — final whole-tree drift audit (CLEAN). Route divergences as in Stage 4.

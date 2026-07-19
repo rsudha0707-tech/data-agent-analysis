@@ -5,6 +5,11 @@ change what you do on the *next* build. The architecture in SKILL.md already enc
 big ones (root-session orchestration, inline fallback, gate-owns-the-run); this file keeps
 the sharp edges.
 
+**How lessons get here:** each build keeps a live `NOTES.md` journal on its feature branch
+(see SKILL.md → "The build journal"). After the run, the durable generic lesson is
+distilled into this file via a separate harness PR; the run-specific war stories stay on
+the build branch.
+
 ### 1. A delegated worker can return before finishing
 - **Symptom:** a `delegate_task` child ends its turn with code written but the last 5%
   (a rename, a failing import, git) skipped — its summary still reads "done".
