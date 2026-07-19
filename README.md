@@ -77,17 +77,23 @@ git clone <this repo> my-agent && cd my-agent
 cp .env.example .env        # set exactly ONE provider key (Anthropic / Gemini / OpenRouter)
 ```
 
-Then open a Hermes session anchored to the repo and **ask in plain words** — this needs no
-setup at all:
+Then open a Hermes session anchored to the repo and **just say what you want, in plain
+English** — no slash command, no setup:
 
 ```
 Build me an agent that monitors my Shopify store for low-inventory products and drafts restock emails.
 ```
 
-Hermes auto-loads `.hermes.md` from the repo, which tells it to read and follow
-`harness/skills/zero-shot-build/SKILL.md`. One deep intake (which also collects your API key
-into `.env`), then the build runs one phase at a time and stops at each boundary with a live
-URL for you to test.
+Hermes auto-loads `.hermes.md` from the repo, which **routes your request to exactly one of
+three skills** and follows it:
+
+- **build** — "build me an agent that…", "add X to it" → creates the agent / adds a capability
+- **fix** — "it's erroring on…", "the tests fail", "X doesn't work" → diagnoses + fixes, then verifies
+- **sync** — "make the code match the spec", "reconcile the drift" → reconciles spec ↔ code (spec wins)
+
+You never pick the skill — describe the goal and the harness chooses. One deep intake (which
+also collects your API key into `.env`), then the build runs one phase at a time and stops at
+each boundary with a live URL for you to test.
 
 **Prefer the `/zero-shot-build` slash command?** Hermes only recognises slash commands that
 are registered — an unregistered one returns "Unknown command". Register this clone once
