@@ -72,9 +72,12 @@ framework. If it does not exist when you need it, stop and raise it as a blocker
 
 ## Skills (entry points)
 
-The skills live at `harness/skills/<name>/SKILL.md` (repo artifacts; optionally installable
-into `~/.hermes/skills/` for slash-command dispatch — `harness/commands/*.md` are thin
-aliases). The skill file is the source of truth either way.
+The skills live at `harness/skills/<name>/SKILL.md`. **No install is required:** when the
+user types `/zero-shot-build` (or asks in plain words to build/fix/sync an agent), READ the
+matching `SKILL.md` and follow it exactly — whether or not the slash command is registered.
+Do not require a setup script; do not improvise a build process; the `SKILL.md` is the
+process. Registering into `~/.hermes/skills/` (or `skills.external_dirs`) only adds `/`
+autocomplete — a convenience, not a requirement.
 
 | Skill | Purpose |
 |-------|---------|

@@ -74,19 +74,25 @@ Three properties make it robust on Hermes:
 
 ```bash
 git clone <this repo> my-agent && cd my-agent
-uv sync
 cp .env.example .env        # set exactly ONE provider key (Anthropic / Gemini / OpenRouter)
-uv run python agent.py      # doctor: verifies env, deps, keys, app, unit tests
 ```
 
-Then, in a Hermes session anchored to the repo:
+Then open a Hermes session anchored to the repo and just invoke it:
 
 ```
 /zero-shot-build An agent that monitors my Shopify store for low-inventory products and drafts restock emails
 ```
 
-One deep intake (which also collects your API key into `.env`), then the build runs one
-phase at a time and stops at each boundary with a live URL for you to test.
+**No install step.** Hermes auto-loads `.hermes.md` from the repo, which routes
+`/zero-shot-build` (registered as a slash command or not) to `harness/skills/zero-shot-build/SKILL.md`
+and follows it. If `/zero-shot-build` isn't in your `/` menu, type it anyway — or just ask
+in plain words ("build me an agent that…") — it runs the same. One deep intake (which also
+collects your API key into `.env`), then the build runs one phase at a time and stops at
+each boundary with a live URL for you to test.
+
+*Optional:* `uv sync && uv run python agent.py` runs a doctor over the baseline (deps, `.env`,
+app, unit tests). *Optional:* register the skills for real `/` autocomplete — see the
+`skills.external_dirs` one-liner in `.hermes.md`. Neither is required to build.
 
 ## What Happens
 
