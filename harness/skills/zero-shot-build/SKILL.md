@@ -196,8 +196,12 @@ For the current phase (Phase 1 first; later phases on user approval):
 
 1. **Read the phase's slices** from `spec/roadmap.md`.
 2. **Implement each slice** via the **code-generator** role — delegate independent slices in
-   parallel (up to 3) when `delegate_task` works; otherwise inline, sequentially, one slice
-   at a time. Each slice = its surfaces + its tests, test-first. Tell each generator exactly
+   parallel (up to 3) when `delegate_task` works AND the LLM key is a paid/dedicated one;
+   otherwise inline, sequentially, one slice at a time. **On a shared/free key, prefer
+   sequential inline** — parallel fan-out multiplies 429s on one credential pool and stalls
+   the build (mining the prior runs showed ~14h cumulative blocked on pool exhaustion).
+   Verify each handback's CONTENT, not just its status — a worker can return
+   `status=completed` whose body is a rate-limit error; that slice is NOT done. Each slice = its surfaces + its tests, test-first. Tell each generator exactly
    which files it owns; slices own disjoint paths.
 3. **Gate each slice as it lands** via the **qa-auditor** role (delegate or inline):
    independent code review + run the slice's real gate (real LLM/API keys from `.env`, prod

@@ -63,3 +63,46 @@ the build branch.
   endpoints + the served UI) → hand the user ONE verified URL + "what to click" → only then
   the multi-select `clarify` checklist (one option per shipped feature + a "nothing worked"
   escape). If it won't boot, that's a BLOCKER to fix, not a question to ask.
+
+---
+
+## From mining the prior runs' Hermes logs (auto-podcaster / music-tutor / data-analyst)
+
+Evidence counts are from `~/.hermes/logs/agent.log*` across Jul 10–20 builds.
+
+### 11. Rate-limit storms dwarf the retry budget — prefer sequential over fan-out on one key
+- **Symptom:** 500+ `429`/`RateLimitError` lines; ~3,300 "credential pool: no available
+  entries" polls ≈ **~14h cumulative blocked**. Parallel fan-out and background sessions all
+  hammer ONE shared key/pool; a 3× / 2–6 s backoff is orders of magnitude too small.
+- **Fix:** on a shared/free key, run slices **sequentially inline** — parallel delegation
+  multiplies 429s, it doesn't speed the build up. Cap your own test generations. Tell the
+  user up front that a small paid balance removes the single biggest source of stalls.
+
+### 12. A delegated worker can report ✓ completed with a 429 error as its whole body
+- **Symptom:** ~29% of delegations delivered a batch marked `status=completed` whose body
+  was only "API call failed after 3 retries". "Completed" ≠ "succeeded".
+- **Fix:** trust-but-verify includes the handback CONTENT — if a worker's return is an
+  error/empty/a rate-limit body, treat the slice as NOT done and finish it inline. Never
+  read the status field alone.
+
+### 13. `clarify` times out at ~300 s and returns an empty answer indistinguishable from a skip
+- **Symptom:** long waits ending in `"user_response": ""`; some sessions burned 80+ min in
+  clarify alone.
+- **Fix:** an empty answer — whether a real skip OR a 5-min timeout — is always "you decide":
+  lowest-risk default, recorded `Assumed:`. Never re-ask the same question; keep questions
+  few and batched so a timeout costs one default, not a lost round.
+
+### 14. Validate the model slug + params, not just the key, on the first real call
+- **Symptom:** first-call-of-session failures — `model_not_found`/`does not exist` (7),
+  `Encrypted content is not supported` (6), unrecognized `reasoning_effort` (3). Free model
+  slugs churn (a pinned `:free` model can vanish or go paid-only overnight).
+- **Fix:** the intake real-call check (pitfall §8) asserts the **model** answers too, not
+  just that the key authenticates. On `model_not_found`, list the provider's current models
+  and pick an available one before building — don't start a phase on a dead slug.
+
+### 15. Long context gets compressed mid-build — keep durable state on disk, not in the chat
+- **Symptom:** frequent context-compression events with message-alternation repairs; state
+  that lived only in the conversation was lost or garbled across a compaction.
+- **Fix:** the spec, the roadmap, `NOTES.md`, and committed code are the durable memory —
+  re-read `spec/roadmap.md` and `git log` at the start of each phase rather than trusting
+  recall. Never hold a decision only in conversational context across a long phase.
