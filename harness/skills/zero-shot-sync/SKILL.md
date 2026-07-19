@@ -6,9 +6,9 @@ disable-model-invocation: true
 allowed-tools: Bash(git*) Bash(uv run*)
 ---
 
-You orchestrate a spec↔code sync by calling worker agents directly. **Spec is the source of truth — when spec and code disagree, fix the code** (harness/patterns/spec-driven.md). Optional scope in `$ARGUMENTS`; otherwise the whole project. Run autonomously to a CLEAN audit; pause only on a hard blocker or if a divergence reveals the *spec* is wrong (surface it — don't silently rewrite the spec to match code).
+You are the ROOT SESSION orchestrating a spec↔code sync by running the specialist roles in `harness/agents/` — via `delegate_task` when available, **inline otherwise** (read the role file as a checklist). Verify every handback. **Spec is the source of truth — when spec and code disagree, fix the code** (harness/patterns/spec-driven.md). Optional scope in `$ARGUMENTS`; otherwise the whole project. Run autonomously to a CLEAN audit; pause only on a hard blocker or if a divergence reveals the *spec* is wrong (surface it — don't silently rewrite the spec to match code).
 
-**qa-auditor runs FIRST** — read-only, it finds and classifies every divergence and its direction; its verdict routes each fix to the responsible **code-generator** and/or **code-generator** by surface. You (the skill) own the commit + push.
+**qa-auditor runs FIRST** — read-only, it finds and classifies every divergence and its direction; its verdict routes each fix to the **code-generator** role by named surface. You (the root session) own the commit + push.
 
 ## Step 1 — Audit (qa-auditor first, drift mode)
 
@@ -25,11 +25,11 @@ Handle High severity first, then Medium; Low only if in scope.
 
 ## Step 3 — Reconcile code (routed by surface, parallel where independent)
 
-Group the "code wrong" divergences **by surface**, then invoke the responsible generator per group:
-- **code-generator** — divergences in `src/` (api, db, graph, llm, tools, prompts, observability).
-- **code-generator** — divergences in the frontend/UI surface.
+Group the "code wrong" divergences **by surface**, then run the **code-generator** role per group:
+- one invocation for divergences in `src/` (api, db, graph, llm, tools, prompts, observability);
+- one invocation for divergences in the frontend/UI surface.
 
-Independent groups (disjoint paths) run **concurrently**. Give each generator the spec section + the offending file(s); it edits code to match the spec and adds/updates a test asserting the spec'd behavior. Group divergences that touch the same files into one invocation.
+Independent groups (disjoint paths) run **concurrently** when delegated, sequentially when inline. Give each generator the spec section + the offending file(s); it edits code to match the spec and adds/updates a test asserting the spec'd behavior. Group divergences that touch the same files into one invocation.
 
 ## Step 4 — Verify (qa-auditor, gate mode)
 

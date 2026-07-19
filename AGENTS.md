@@ -1,19 +1,48 @@
-# Claude Code — Entry Point
+# Hermes — Entry Point
 
-This is a spec-driven AI agent boilerplate. Read this file first, then follow the instructions below.
+This is a spec-driven AI-agent boilerplate for **Hermes**. Read this file first, every
+session, then follow the instructions below.
 
 ## What This Repo Is
 
-A starting template for building AI agents. The spec in `spec/` is either:
-- **Partially or fully filled in** — you are implementing an agent from a completed spec
-- **Empty / placeholder** — you are in the build phase; run `/zero-shot-build` to drive the spec and build
+A starting template for building AI agents spec-first, with a **working baseline agent
+committed in `src/`** (FastAPI + LangGraph + SQLite; provider-agnostic LLM — Anthropic,
+Gemini, or OpenRouter via `.env`). `uv run pytest tests/unit -q` passes on a fresh clone.
+The spec in `spec/` is either:
+
+- **Filled in** — you are implementing an agent from a completed spec
+- **Empty / placeholder** — run `/zero-shot-build` to drive the spec and the build
+
+## The Execution Model (Hermes-native — this governs everything)
+
+**The ROOT SESSION is the orchestrator.** It alone owns:
+- the **human channel** — `clarify` questions (plain-text one-by-one fallback), gates, blockers
+- **git / branch / PR / commit+push**
+- the **server lifecycle** — booting, smoking, and keeping the app serving for the user
+
+The three specialist roles in `harness/agents/` are **dual-mode**: run them via
+`delegate_task` when it is available (parallel for independent slices), or **inline** —
+the root reads the role file as a checklist — when delegation is capped or a worker
+stalls. Delegated workers cannot spawn workers (`max_spawn_depth=1`), cannot talk to the
+user, may return early (the root verifies every handback: files exist, gates really ran),
+and their background processes are killed on return.
+
+| Role | Job | Mode |
+|------|-----|------|
+| spec-writer | The single design authority — writes the FULL spec (architecture + agent-graph + phased plan) and self-reviews it | delegate or inline |
+| code-generator | Implements ONE independent slice (backend `src/`, frontend, or both) plus its tests | delegate (parallel per slice) or inline (sequential) |
+| qa-auditor | Independent read-only review + runs the real gates + drift audits; classifies SPEC-vs-CODE in fix/sync | delegate or inline |
+
+The build loop per slice: **implement → run the REAL gate → read the actual output → fix →
+re-run.** Never claim, always observe.
 
 ## Your First Action Every Session
 
-1. Read `harness/rules/ai-agents.md` — mandatory rules for all AI sessions
+1. Read `harness/rules/ai-agents.md` — mandatory rules for all sessions
 2. Check whether `spec/roadmap.md` has been filled in:
-   - If it still contains `<!-- FILL IN -->` placeholders → the spec is not ready; do not write application code yet
-   - If it is filled in → proceed to read the full spec manifest below before touching any code
+   - Contains `<!-- FILL IN -->` → the spec is not ready; do not write application code;
+     point the user at `/zero-shot-build`
+   - Filled in → read the full spec manifest below before touching code
 
 ## Spec Manifest (read in this order when spec is complete)
 
@@ -24,7 +53,7 @@ spec/capabilities/          ← all files
 spec/data.md
 spec/api.md
 spec/ui.md
-spec/agent.md     ← REQUIRED for any agent framework project
+spec/agent.md               ← REQUIRED for any agent-framework project
 harness/rules/ai-agents.md
 harness/patterns/spec-driven.md
 harness/patterns/phases.md
@@ -38,51 +67,44 @@ harness/patterns/agentic-ai.md     ← catalogue of agentic patterns (chosen gra
 harness/rules/git.md
 ```
 
-**`spec/agent.md` is mandatory** for any project using LangGraph, CrewAI, AutoGen, or any agent orchestration framework. If it does not exist when you reach Phase 2, stop and raise it as a blocker. (The reusable catalogue of agentic-AI patterns to choose from lives in `harness/patterns/agentic-ai.md`.)
-
-## If the Spec Is Not Ready
-
-Tell the user to run **`/zero-shot-build [their idea]`**. That skill runs one intake round — the only interactive setup step. It may ask additional clarifying questions, and asks the user to fill `.env` with the required API keys/secrets. Once intake completes, the **agent-builder** orchestrator runs design → scaffold → build, one phase per invocation. It is autonomous *within* a phase and stops at each phase boundary for a **human testing gate** — the user tests the increment before the next phase starts. Each phase delivers the smallest user-testable win, built first-time-right on the tested path.
+**`spec/agent.md` is mandatory** for any project using LangGraph or another orchestration
+framework. If it does not exist when you need it, stop and raise it as a blocker.
 
 ## Skills (entry points)
 
-These are the entry points. All are manual (`disable-model-invocation: true`). Each is invocable as a skill **and** as a slash command (`harness/commands/<name>.md` defers to the skill — the skill is the source of truth, so the two never drift).
+The skills live at `harness/skills/<name>/SKILL.md` (repo artifacts; optionally installable
+into `~/.hermes/skills/` for slash-command dispatch — `harness/commands/*.md` are thin
+aliases). The skill file is the source of truth either way.
 
-| Skill / command | Purpose |
-|-----------------|---------|
-| `/zero-shot-build [idea]` | Idea → working, verified skeleton (drives the agent-builder). Also adds a new capability. |
-| `/zero-shot-fix [target]` | Diagnose + fix a bug, error, failing test, or spec/code drift, then verify. |
-| `/zero-shot-sync [scope]` | Reconcile spec ↔ code so they match (spec wins), then verify. |
+| Skill | Purpose |
+|-------|---------|
+| `/zero-shot-build [idea]` | Idea → working, verified, phased agent. Also adds a capability to an existing agent. |
+| `/zero-shot-fix [target]` | Diagnose + fix a bug/error/failing test/drift, then verify. |
+| `/zero-shot-sync [scope]` | Reconcile spec ↔ code (spec wins), then verify. |
 
 ## Key Rules (summary — full rules in harness/rules/ai-agents.md)
 
 - Never write application code before reading the full spec
-- Never skip a phase — complete phase N before starting phase N+1
-- Commit every logical unit of work; never let the working tree stay dirty
-- Each phase is tested by the human before the next phase starts — stop at the phase boundary, hand off the test instructions, and wait for the user
-- Tight scope, first-time-right — each phase is the smallest user-testable win and must work the first time the user tests it; zero rough edges on the tested path
-- Tests and evals run against the real LLM/API using keys from `.env` — never gate the build on offline/stubbed runs
-- When in doubt, ask at intake — do not guess requirements; once intake completes, build a phase autonomously and stop for the human testing gate
+- Never skip a phase; the human tests each phase before the next starts
+- The root session owns the run at every human gate: boot with the pinned interpreter
+  (`.venv/bin/python -m src`), verify live, hand ONE URL — the user never runs a terminal
+  command to test
+- Commit + push are one atomic action; a PR exists before the first feature commit;
+  `main` is boilerplate-only — ABSOLUTELY (builds branch from current HEAD, PR `--base $base`)
+- Tests and gates run against the real LLM/API with keys from `.env` — a stubbed pass is
+  not a pass; a present-but-dead key is a BLOCKER naming the env var
+- One batched LLM call per artifact — never a call per output line/token
+- When in doubt, ask at intake; empty answer = lowest-risk default recorded as `Assumed:`
 
-## The skeleton in `src/`
+## The Baseline in `src/` (the capability slot)
 
-`src/` is the **opinionated baseline** — a working FastAPI + LangGraph + SQLite + Anthropic agent whose capability slot is `transform_text`. Tests pass out of the box. Generators extend this in place — they never copy or rename. The capability slot is:
+`src/` is a working agent whose capability slot is `transform_text`. Tests pass out of the
+box. Generators extend it in place — never copy or rename. Replace three surfaces:
 
-- `src/graph/nodes.py` — `transform_text` node → replace with your capability logic
-- `src/prompts/transform.md` → replace with your system prompt
-- `frontend/src/app/page.tsx` → replace the transform form with your UI
+- `src/graph/nodes.py` — the `transform_text` node → your capability logic
+- `src/prompts/transform.md` → your system prompt
+- `frontend/public/` → your UI (zero-build static, served at `/app`)
 
-Everything else (graph structure, runner, API, DB session, settings, test fixtures) is already wired and tested — do not change it unless the spec requires it.
-
-## Sub-agents (the team)
-
-`/zero-shot-build` delegates a full build to **agent-builder**, which plans and coordinates the rest and owns git/PR. `/zero-shot-fix` and `/zero-shot-sync` call the workers directly (no agent-builder) and own git themselves. Each agent is one full, self-contained definition at `harness/agents/<name>.md` (the path is the agent slug).
-
-| Agent | Role | Tools |
-|-------|------|-------|
-| agent-builder | Orchestrator — plans phases, fans out code-generator instances per slice (in parallel), and owns the git/PR surface for a build | read/bash/agent |
-| spec-writer | The single design authority — writes the FULL spec (incl. architecture + agent-graph + phased plan) **and** self-reviews it | read/write |
-| code-generator | Implements ONE independent slice (backend `src/`, frontend `frontend/`, or both) plus tests — spawned in parallel, one per slice | read/write/bash |
-| qa-auditor | Independent review **and** run gates/tests/app **and** audit spec↔code drift; runs FIRST in fix/sync and classifies root cause SPEC-vs-CODE | read-only (bash) |
-
-Pattern: **spec-writer** writes the whole spec and carves each phase into independent slices. **agent-builder** fans out one **code-generator** per slice in a single Agent message (max parallelism — disjoint paths, never conflict). **qa-auditor** independently gates each slice and audits drift — it never edits. The **human tests between phases**.
+Everything else — graph assembly, runner, API envelope, DB session, settings, the
+Anthropic/Gemini/OpenRouter provider layer, structured logging, test fixtures — is wired
+and tested. Full layout: `harness/patterns/project-layout.md`.

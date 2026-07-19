@@ -1,6 +1,6 @@
 # Git Discipline
 
-All git rules that apply to every Claude Code session in this repo.
+All git rules that apply to every Hermes session in this repo. Only the ROOT SESSION runs git — delegated workers never commit, push, or branch.
 
 ---
 

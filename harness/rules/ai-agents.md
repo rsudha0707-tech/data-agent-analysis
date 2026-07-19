@@ -1,8 +1,16 @@
 # AI Agent Rules
 
-**These rules apply to every Claude Code session in this repo.**
+**These rules apply to every Hermes session in this repo.**
 
 Read this file completely before doing anything else.
+
+**The Hermes execution model (governs every build):** the ROOT SESSION is the orchestrator —
+it alone owns the human channel (`clarify` + plain-text fallback), git/PR, and the server
+lifecycle. The specialist roles in `harness/agents/` (spec-writer, code-generator,
+qa-auditor) run via `delegate_task` when available and **inline otherwise** — the root reads
+the role file as a checklist. Delegated workers cannot spawn workers, cannot ask the user,
+may return early (the root verifies every handback and finishes remainders), and their
+background processes die on return.
 
 ---
 
@@ -51,10 +59,10 @@ Complete all steps in order before writing any code:
 - [ ] Read `spec/roadmap.md` — know what you're building
 - [ ] Check if the spec is complete (no `<!-- FILL IN -->` markers in product spec files)
   - If incomplete: tell the user to run `/zero-shot-build`; do not write application code
-- [ ] If spec is complete: read the full spec manifest in `CLAUDE.md`
+- [ ] If spec is complete: read the full spec manifest in `AGENTS.md`
 - [ ] Run `git status` — working tree must be clean before starting
 - [ ] **Branch from the current HEAD**: `base=$(git rev-parse --abbrev-ref HEAD)` then `git checkout -b feature/<slug>-$(date +%Y%m%d-%H%M)-v0.1` (the date-time slug keeps the branch name unique) — branch from wherever you are so the build dogfoods THIS harness version; never `git checkout main` first (see `harness/rules/git.md`)
-- [ ] **Create the project directory** `<agent-slug>/` if it doesn't exist — never write agent code into the boilerplate root
+- [ ] **The repo root IS the project** — extend the baseline `src/` and `frontend/public/` in place (`harness/patterns/project-layout.md`); never write app code at the repo root, never create a second package beside `src/`
 - [ ] Confirm `.env` exists and contains the required API keys/secrets (requested at intake) — tests and the build run against the real LLM/API using these keys
 - [ ] Confirm which phase you are implementing (see `harness/patterns/phases.md`)
 

@@ -14,14 +14,30 @@ Reason: port 8000 is commonly occupied by other local services (FastAPI apps, Dj
 - README must reference `http://localhost:8001`
 - `.env.example` should include `PORT=8001` if the port is configurable
 
-## Frontend Static-Export & Styling Rule
+## Frontend Rule — Zero-Build Static by Default
 
-When the frontend is a **Next.js static export served by the backend** (the skeleton's model: `output: 'export'`, `basePath: '/app'`, mounted by FastAPI at `/app`), three things are mandatory — each was a real first-build failure:
+The baseline frontend is **zero-build static files** (`frontend/public/`: index.html +
+styles.css + app.js) served by the backend at `/app`. No npm, no bundler, no Node version
+hazard — the styled-render gate reduces to "the served page contains the real UI and its
+linked CSS/JS return 200 non-empty".
 
-- **Single-origin is the canonical run + test path.** The user (and the gate) runs **one** server: `cd frontend && pnpm build` → `uv run python -m src`, then opens **`http://localhost:8001/app/`** (note the port `8001`, the `/app/`, and the trailing slash). Do **not** hand the user the two-server `pnpm dev` (`:3000`) flow as the test path — with `basePath: '/app'`, `localhost:3000/` 404s and the API origin differs, which reads as "nothing loads". `pnpm dev` is for inner-loop dev only.
-- **Tailwind v4 requires `postcss.config.mjs` (plugin: `@tailwindcss/postcss`) and `@source "../";` in the global CSS file.** Without both, the built CSS has no utility classes — the UI renders unstyled even though the build exits 0. **Code-generators must never replace or omit these two files** — extend `globals.css` below the `@source` line, never overwrite the first two lines. The gate must verify the built CSS contains real utility selectors, not just check HTTP 200.
-- **Node-version safety.** Node ≥25 exposes a broken global `localStorage` unless `--localstorage-file` is set, which crashes Next SSR (`localStorage.getItem is not a function` → every page 500s). The frontend `dev`/`build`/`start` scripts must carry `NODE_OPTIONS=--no-experimental-webstorage` (or the project must pin a supported Node LTS via `.nvmrc`/`engines`).
-- **Playwright E2E (required for any project with a frontend).** Every frontend build must include a `tests/e2e/` directory with Playwright smoke tests. Install via `pnpm add -D @playwright/test && npx playwright install --with-deps chromium` (chromium only is sufficient for the gate). The Phase 1 smoke must cover: page loads and is styled, primary input works, real output appears (not a spinner or error state). Gate command: `npx playwright test tests/e2e/ --reporter=line`. **A frontend gate that only checks HTTP 200 or CSS selectors is not a gate — Playwright must also pass.**
+- **Single-origin is the canonical run + test path.** One server: `uv run python -m src`,
+  then open **`http://localhost:8001/app/`** (port `8001`, `/app/`, trailing slash). The
+  gate and the user test this exact path.
+- **Adopt a JS framework (Next.js/React/Vite) ONLY when the spec genuinely needs it** —
+  complex client state, routing, component reuse at scale. A framework adds a build
+  pipeline that the gates must then cover, and every one of these was a real first-build
+  failure in the field:
+  - the production build must run and its **built assets must be what the backend serves**
+    (single-origin, never a two-server dev flow as the test path);
+  - the built CSS must contain real utility selectors — an unstyled 200 fails the gate;
+  - pin a supported Node LTS (`.nvmrc`/`engines`) — bleeding-edge Node has shipped
+    SSR-breaking globals;
+  - commit the lockfile.
+- **E2E for any UI surface:** a live-server smoke that walks the primary journey and
+  asserts real output content appears (TestClient/httpx against the running app). If the
+  project adopted a JS framework with client-side rendering, add a headless-browser smoke
+  (e.g. Playwright) — content assertions against server-rendered/static HTML don't need one.
 
 ## LLM Model Name Rule
 

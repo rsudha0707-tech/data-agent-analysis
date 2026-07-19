@@ -26,13 +26,13 @@ Phase 1 is the **smallest user-testable win** — the full primary user journey 
 - All calls on the tested path hit the real LLM/API (keys from `.env`) — no fake data on what the user tests.
 - **Gate (all must pass):**
   1. `pyproject.toml` declares the DB driver in `[project.dependencies]` (e.g. `psycopg2-binary` for PostgreSQL) — never dev-only
-  2. `uv run alembic upgrade head` succeeds against the configured database — run and confirmed, not assumed
-  3. **Boots via the documented run command** — the app starts on its exact README/roadmap run command from the project root (e.g. `uv run python -m src`) with no `ImportError`/`ModuleNotFoundError`. A green pytest run does NOT prove this (pytest's path masks `src.`-prefixed import bugs); the test path must equal the run path.
+  2. If the schema changed from the baseline: `uv run alembic upgrade head` succeeds and `uv run alembic current` prints a revision — run and confirmed against the same DB the server uses (a stale dev DB turns a green suite into a live 500)
+  3. **Boots via the documented run command** — the app starts on its exact README/roadmap run command from the repo root with the pinned interpreter (`.venv/bin/python -m src` / `uv run python -m src`) with no `ImportError`/`ModuleNotFoundError`. A green pytest run does NOT prove this (pytest's path masks `src.`-prefixed import bugs); the test path must equal the run path.
   4. Primary user journey works end-to-end against the real LLM/API; tests pass
   5. **Agentic stack gate:** graph compiles, state flows through nodes, agent is invocable — confirmed by the Phase 1 test
-  6. **Styled-render (any static-export UI):** after `pnpm build`, the served page at the single-origin path (`:8001/app/`) is rendered AND styled — the built CSS bundle contains real utility selectors and no unexpanded `@tailwind`/`@source` remains. An unstyled 200 fails the gate.
-  7. **Headless E2E (any project with a frontend):** Playwright smoke runs against the live app (`http://localhost:8001/app/`) and asserts the primary user journey renders correctly, is interactive, and shows real output — not just a 200. A CSS-grep pass without a Playwright pass is not sufficient.
-  8. **Observability wired:** LangSmith tracing enabled (LangGraph builds) and/or structured request/response logging to stdout confirmed working — a log line or trace appears for the Phase 1 end-to-end run. Observability is never deferred.
+  6. **Rendered-UI check (any UI surface):** the served page at the single-origin path (`:8001/app/`) contains the phase's real UI, and its linked CSS/JS assets return 200 non-empty. If the project adopted a JS framework: the production build ran and its built output is what's served, styled. An unstyled or empty 200 fails the gate.
+  7. **Live-server E2E (any UI/HTTP surface):** a smoke against the live app walks the primary user journey and asserts real output content appears — not just a 200. (Headless-browser tooling e.g. Playwright is required only for client-side-rendered frameworks; the zero-build static frontend is gated with TestClient/httpx content assertions.)
+  8. **Observability wired:** structured request/response logging to stdout confirmed working — a log line appears for the Phase 1 end-to-end run. Observability is never deferred.
   9. Working tree is clean and committed
   10. Phase test-handoff published; the human has tested and approved (see Human Testing Gate)
 
@@ -97,8 +97,8 @@ After a phase passes its automated gate and is committed, the build publishes a 
 ## Parallel Slices Within a Phase
 
 - spec-writer carves each phase into INDEPENDENT SLICES (the parallel units) with explicit dependencies; default to independence so slices build concurrently.
-- agent-builder fans out a generator per slice — multiple code-generator invocations in a SINGLE message so they run concurrently (disjoint paths: frontend writes the frontend surface, backend writes `src/` — never the same file). Then fans out qa-auditor per slice concurrently and aggregates verdicts.
-- Serialize ONLY across a true declared dependency. On a BLOCKED slice, loop only that slice's generator; other slices are unaffected. For headless/CLI builds, only backend generators run.
+- The root session runs the code-generator role per slice — delegated in parallel when `delegate_task` is available (disjoint paths: frontend slices write the frontend surface, backend slices write `src/` — never the same file), sequentially inline otherwise. qa-auditor gates each slice as it lands.
+- Serialize ONLY across a true declared dependency. On a BLOCKED slice, loop only that slice's generator; other slices are unaffected. For headless/CLI builds, only backend slices exist.
 
 ## Phase Gates
 
@@ -107,8 +107,8 @@ A phase is complete when ALL of the following are true:
 2. All tests for the phase pass
 3. Working tree is clean
 4. Phase test-handoff published; (build) human tested and approved
-5. qa-auditor sub-agent (or manual QA checklist) has signed off
-6. For Phase 1 specifically: `alembic upgrade head` has been run against the real DB and succeeded
+5. The qa-auditor role (delegated or run inline by the root session) has signed off
+6. If the phase changed the schema: `alembic upgrade head` has been run against the real DB and succeeded
 7. **README updated** — every command, env var, setup step, route, or capability this phase added is reflected in `README.md`, and every README command in scope has been run and confirmed to work from the stated directory. A stale README is a BLOCKER.
 
 **Never mark a phase complete if any gate is red.**
