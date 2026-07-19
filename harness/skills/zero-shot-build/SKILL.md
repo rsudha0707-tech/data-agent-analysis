@@ -69,11 +69,15 @@ Intake has **two fixed sections and a variable middle**:
 2. **Technical round (fixed, always last)** — build-blockers only (LLM provider, stack,
    access method).
 
-All rounds use `clarify`. Two resilience rules:
+All rounds use `clarify`. Three resilience rules:
 
-- **If `clarify` doesn't load** (it can fail on a plain command line), ask the questions in
-  plain text **one by one** — ask one, wait for the reply, then ask the next. Never dump all
-  questions in a single message.
+- **If `clarify` fails DURING a round** (mid-round timeout, empty result, unavailable), fall
+  back to plain text for the REMAINING rounds only — ask one question at a time, wait for the
+  reply, then ask the next. **Never restart from Round 1.** Skip any round already
+  successfully completed via clarify. This is a mid-stream fallback, not a full reset.
+- **Once all product rounds AND the technical round are complete**, intake is done. Do NOT
+  loop back to re-ask previous rounds. If you're uncertain about an answer from earlier,
+  record it as `Assumed: …` in the brief and move forward. Intake happens exactly once.
 - **Follow up on ambiguity.** If an answer could be read two ways, or a single pick may have
   dropped options that also apply, ask a short follow-up — never guess.
 - **Empty answer = "you decide".** Pick the lowest-risk default, record it as
