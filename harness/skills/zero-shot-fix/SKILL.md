@@ -6,9 +6,9 @@ disable-model-invocation: true
 allowed-tools: Bash(git*) Bash(uv run*)
 ---
 
-You orchestrate a targeted fix by calling worker agents directly — no full agent-builder needed. The target is in `$ARGUMENTS`. **If `$ARGUMENTS` is empty, ask the user in plain text to describe what's broken — the bug, error, failing test, or drift — and WAIT for their free-text reply before doing anything else.** Do NOT load `clarify` to solicit, suggest, or pick the problem — the problem statement must come from the user as their own text. Only once you have it do you proceed to Step 1. Run autonomously: diagnose+classify → fix → verify, looping until the failure signal is gone. Pause only on a hard blocker or explicit request.
+You are the ROOT SESSION orchestrating a targeted fix by running the specialist roles in `harness/agents/` — via `delegate_task` when available, **inline otherwise** (read the role file as a checklist; the build never stalls waiting for a worker that can't spawn). Verify every handback: files exist, the gate was really run. The target is in `$ARGUMENTS`. **If `$ARGUMENTS` is empty, ask the user in plain text to describe what's broken — the bug, error, failing test, or drift — and WAIT for their free-text reply before doing anything else.** Do NOT load `clarify` to solicit, suggest, or pick the problem — the problem statement must come from the user as their own text. Only once you have it do you proceed to Step 1. Run autonomously: diagnose+classify → fix → verify, looping until the failure signal is gone. Pause only on a hard blocker or explicit request.
 
-**qa-auditor runs FIRST** — it diagnoses, captures the failing signal, and CLASSIFIES the root cause (SPEC vs CODE, and which surface). Its verdict ROUTES the fix and names which generator. Fixing happens in the **code-generator** and/or **code-generator** (picked by surface); judging happens in read-only **qa-auditor**; you (the skill) own the commit + push.
+**qa-auditor runs FIRST** — it diagnoses, captures the failing signal, and CLASSIFIES the root cause (SPEC vs CODE, and which surface). Its verdict ROUTES the fix and names the surface. Fixing happens in the **code-generator** role (one invocation per named surface — `src/` and/or frontend); judging happens in read-only **qa-auditor**; you (the root session) own the commit + push.
 
 ## Step 1 — Diagnose + classify (qa-auditor first)
 
@@ -33,7 +33,7 @@ Done-when, by signal:
 ## Step 2 — Fix (routed by the verdict)
 
 - **SPEC root cause** → invoke **spec-writer** to rewrite the spec section, then invoke the responsible generator(s) to redo the code toward the corrected spec.
-- **CODE root cause** → invoke the responsible generator(s) directly — **code-generator** for `src/` (api, db, graph, llm, tools, prompts, observability), **code-generator** for the frontend/UI surface. Both can run concurrently if the fix spans both surfaces (disjoint paths).
+- **CODE root cause** → run the **code-generator** role per named surface — one for `src/` (api, db, graph, llm, tools, prompts, observability), one for the frontend/UI surface. They can run concurrently (delegated) or sequentially (inline) if the fix spans both surfaces — disjoint paths either way.
 
 Give the generator the precise target, the responsible files, and the spec sections defining correct behavior. It fixes toward spec intent and adds/updates a regression test (for an LLM/API bug, the regression test uses real keys from `.env`). It must not mute a test or delete an assertion to go green; if spec and test genuinely conflict, it stops and reports (likely a spec bug → re-run Step 1 as SPEC, or suggest `/zero-shot-sync`).
 
@@ -47,7 +47,7 @@ Give the generator the precise target, the responsible files, and the spec secti
 - No DB migration added (`migrations/` untouched)
 - No API contract changed (`spec/api.md` untouched)
 
-Invoke **qa-auditor in scoped gate mode**: verify only the changed surface — run the targeted tests covering the changed files + the new regression test + one real-key smoke call on the exact behavior that was broken (and a frontend `npm run build` only if a frontend file changed). It does NOT run the full suite or full E2E. It still reviews the diff with fresh eyes and returns VERIFIED/BLOCKED. Typical cost: ~1–2 min vs. the full gate's 10+.
+Invoke **qa-auditor in scoped gate mode**: verify only the changed surface — run the targeted tests covering the changed files + the new regression test + one real-key smoke call on the exact behavior that was broken (and re-fetch the served page if a frontend file changed — the static frontend has no build step; a framework build runs only if the project adopted one). It does NOT run the full suite or full E2E. It still reviews the diff with fresh eyes and returns VERIFIED/BLOCKED. Typical cost: ~1–2 min vs. the full gate's 10+.
 
 ### Full gate — use when: SPEC root cause / migration added / API contract changed / > 3 files changed / scoped gate came back BLOCKED
 

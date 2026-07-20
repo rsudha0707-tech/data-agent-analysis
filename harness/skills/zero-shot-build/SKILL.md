@@ -1,177 +1,329 @@
 ---
 name: zero-shot-build
-description: Turn a zero-shot idea into a perfectly-working, thoroughly-tested, spec-driven agent. One intake round (which also collects the API keys into .env), then the agent-builder builds one phase at a time — autonomous within a phase, with a human testing gate between phases. Also used to add a new capability to an existing agent.
+description: Turn a zero-shot idea into a perfectly-working, thoroughly-tested, spec-driven agent. One deep intake (which also collects the API keys into .env), then the ROOT SESSION orchestrates the build one phase at a time — autonomous within a phase, with a human testing gate between phases. Also used to add a new capability to an existing agent.
 argument-hint: [your idea]
 disable-model-invocation: true
-allowed-tools: Bash(git*) Bash(gh*)
+allowed-tools: Bash(git*) Bash(gh*) Bash(uv*)
 ---
 
-You run the human channel — intake, then the testing gate at every phase boundary — and hand the building off to the **agent-builder** orchestrator. The idea is in `$ARGUMENTS`. **If `$ARGUMENTS` is empty, ask the user in plain text to describe their idea / the problem they want to solve, and WAIT for their free-text reply before doing anything else.** Do NOT load `clarify` to solicit, suggest, or pick the idea — the idea must come from the user as their own text. Only once you have the idea do you move to Stage 1 intake. Goal: **one prompt → a perfectly-working, thoroughly-tested agent, one user-testable phase at a time.**
+# zero-shot-build — the Hermes build loop
 
-**Autonomy model:** autonomous *within* a phase; a **human testing gate between phases**. Intake is the only interactive SETUP step; after it, agent-builder builds a phase end-to-end without pausing, then returns a test-handoff. You present the handoff, handhold the user through testing, and only proceed to the next phase on the user's go. agent-builder pauses mid-phase only on a hard blocker (e.g. a required key still missing from `.env`).
+**You are the ROOT SESSION and you are the orchestrator.** On Hermes there is no delegated
+"agent-builder" running the build for you: delegated workers cannot spawn their own workers
+(`max_spawn_depth=1`), cannot talk to the user, and their background processes are killed the
+moment they return. Everything that needs the user, git, or a long-lived server therefore
+lives HERE, in the root session. You delegate *leaf work* (spec-writing, one code slice, one
+audit) to the specialist roles in `harness/agents/` — via `delegate_task` when it is
+available, **inline otherwise** — and you verify every handback yourself.
+
+The idea is in `$ARGUMENTS`. **If `$ARGUMENTS` is empty, ask the user in plain text to
+describe their idea and WAIT for their free-text reply.** Never use `clarify` to solicit or
+suggest the idea itself — the idea must come from the user as their own text.
+
+Goal: **one prompt → a perfectly-working, thoroughly-tested agent, one user-testable phase
+at a time.**
+
+## The execution model (read this before anything else)
+
+| Concern | Owner | Why |
+|---|---|---|
+| Talking to the user (`clarify`, gates, blockers) | **Root session only** | workers cannot own the human channel |
+| git / branch / PR / commit+push | **Root session only** | workers may return early; git must never be half-done |
+| Server lifecycle (boot, smoke, keep serving) | **Root session only** | a worker's background processes die when it returns |
+| Writing the spec | spec-writer role | single design authority, self-reviewed |
+| Implementing one slice + its tests | code-generator role (one per slice) | parallel when delegation works, sequential inline otherwise |
+| Independent review + running gates | qa-auditor role | read-only checker, never the author |
+
+**Delegation policy — try, verify, fall back inline:**
+
+1. **Try** `delegate_task` for each specialist role (name the role file; up to 3 children in
+   parallel for independent slices).
+2. **Verify every handback.** A worker's summary is advisory, not evidence. On return: check
+   the durable files actually exist, re-run its gate command cheaply (`py_compile`,
+   `pytest --collect-only`, or the real gate if logic changed), confirm it committed nothing
+   (git is yours). A worker that returned at "95% done" is normal — **you finish the
+   remainder inline**; never re-delegate the same 5%.
+3. **Fall back inline.** If delegation is unavailable, errors out, or stalls: read the role
+   file (`harness/agents/<role>.md`) and execute it yourself as a checklist, in the same
+   order the delegated version would run. The build NEVER stalls waiting for a worker that
+   cannot spawn. Inline is the *normal* mode on constrained Hermes configs, not a failure.
+
+**The inner loop (per slice — this is the engine):**
+
+```
+implement → run the REAL gate → READ the actual output → fix → re-run
+```
+
+Never claim, always observe: a gate "passes" only when you ran the exact command and read
+its real output tail this session. Cheap re-verification (`py_compile` + collect-only) after
+mechanical edits; the full real-key gate after logic changes and before any handoff.
 
 ## Stage 1 — Intake (the only interactive setup step)
 
 Intake has **two fixed sections and a variable middle**:
 
-1. **Product rounds (variable, minimum 5)** — all product questions, progressively deeper. You keep going until you have resolved every dimension that would force a design decision in Phase 1. Five rounds is the floor; complex ideas may need 6, 7, or more. Each round covers a different dimension and must not repeat covered ground.
-2. **Technical round (fixed, always last)** — one round of build-blockers only (LLM provider, stack, access method).
+1. **Product rounds (variable, minimum 5)** — all product questions, progressively deeper.
+   Keep going until every dimension that would force a design decision in Phase 1 is
+   resolved. Five rounds is the floor; complex ideas may need more. Each round covers a
+   different dimension and never repeats covered ground.
+2. **Technical round (fixed, always last)** — build-blockers only (LLM provider, stack,
+   access method).
 
-All rounds use `clarify`; the API key prompt is the only additional manual step. Two resilience rules:
+All rounds use `clarify`. Three resilience rules:
 
-- **If the dynamic question tool doesn't load** (`clarify` can fail to load, e.g. when Hermes runs on a plain command line), ask the questions in plain text **one by one** — ask one, wait for the reply, then ask the next. Never throw all the questions at the user in a single message.
-- **Follow up on ambiguity.** If an earlier question/answer could be read two ways, or the user could not multi-select and their single pick may have dropped options that also apply, ask a short follow-up question to clarify before moving on — never guess.
+- **If `clarify` fails DURING a round** (mid-round timeout, empty result, unavailable), fall
+  back to plain text for the REMAINING rounds only — ask one question at a time, wait for the
+  reply, then ask the next. **Never restart from Round 1.** Skip any round already
+  successfully completed via clarify. This is a mid-stream fallback, not a full reset.
+- **Once all product rounds AND the technical round are complete**, intake is done. Do NOT
+  loop back to re-ask previous rounds. If you're uncertain about an answer from earlier,
+  record it as `Assumed: …` in the brief and move forward. Intake happens exactly once.
+- **Follow up on ambiguity.** If an answer could be read two ways, or a single pick may have
+  dropped options that also apply, ask a short follow-up — never guess.
+- **Empty answer = "you decide".** Pick the lowest-risk default, record it as
+  `Assumed: …` in the brief, and move on. Don't re-ask, don't block.
 
-**How to decide when to stop product rounds:** After each round, ask: *"Is there any dimension — interaction model, state/memory, features, constraints, edge cases, observability, integrations — that, if left unresolved, would force spec-writer to guess?* If yes: write another product round on that dimension. If no: move to the technical round. Err on the side of one more round rather than handing off an ambiguous brief.
+**How to decide when to stop product rounds:** after each round ask: *"Is there any
+dimension — interaction model, state/memory, features, constraints, edge cases,
+observability, integrations — that, if left unresolved, would force spec-writer to guess?"*
+If yes: another round on that dimension. If no: technical round. Err toward one more round
+rather than an ambiguous brief.
 
-**The golden rule: Phase 1 is the smallest user-testable quick win.** Richer intake sharpens *which* slice to build first — it does not license a bigger Phase 1. More rounds ≠ bigger scope; it means better-scoped scope.
+**The golden rule: Phase 1 is the smallest user-testable quick win.** Richer intake sharpens
+*which* slice to build first — it does not license a bigger Phase 1.
 
-**Precondition: you already have the user's idea as their own free text** (from `$ARGUMENTS` or the plain-text prompt above). Never use `clarify` to generate or propose the idea itself.
+**The cardinal rule across ALL rounds: every question and every option must be specific to
+THIS idea.** After Round 1 you know the idea category — use it. A user must instantly
+recognise every option as being about their thing. Generic options are a failure.
 
-**The cardinal rule across ALL five rounds: every question and every option must be specific to THIS idea.** After Round 1 you know the idea category — use it. For a data analyst agent, Round 2 options should be things like "persistent sessions with conversation history" and "multi-file joins across uploaded datasets" — not generic buckets like "stateful" or "multi-entity". A user must instantly recognise every option as being about their thing. Generic options are a failure.
+### Round 1 — What is the idea? (4 questions, all multiSelect)
 
----
+Acknowledge the idea in one sentence, then ask four themes — adapt wording and all options
+to the idea:
 
-### Round 1 — What is the idea? (4 questions)
+- **What it works on** *(4 idea-specific options)* — the data, content, or domain it
+  processes. Concrete: not "documents" but "CSV exports from our CRM".
+- **What it produces** *(4 idea-specific options)* — concrete outputs: "an interactive chart
+  I can explore", "a ranked list with reasons".
+- **Usage pattern** — who uses it, how often, in what context.
+- **Non-negotiables** — always offer at least: "My data can't leave my machine", "Keep costs
+  very low", "Must connect to [something they mentioned]", "None — just build it well".
 
-1. Acknowledge the idea in one sentence.
-2. Load the question tool: `clarify` with query `select:clarify`.
-3. Ask **4 questions** via `clarify`, all `multiSelect: true`. Plain, friendly language — no technical jargon. Pure product questions.
+### Round 2 — How users interact (4 questions, all multiSelect)
 
-   Four themes — adapt wording and all options to the idea:
-   - **What it works on** *(4 idea-specific options)* — the data, content, or domain it processes. Be concrete: not "documents" but "CSV exports from our CRM", "raw survey responses", "GitHub PR diffs".
-   - **What it produces** *(4 idea-specific options)* — the output or action it delivers. Be concrete: not "a result" but "an interactive chart I can explore", "a ranked list with reasons", "a cleaned file ready to re-upload".
-   - **Usage pattern** *(4 options)* — who uses it, how often, in what context. E.g. "Just me, a few times a day", "My whole team on-demand", "Runs automatically on a trigger", "Our customers use it directly".
-   - **Non-negotiables** *(4 options)* — always offer at least: "My data can't leave my machine / this server", "Keep costs very low", "Must connect to [something they mentioned]", "None — just build it well".
+Write ALL questions and options as a product designer who has used tools exactly like this:
 
----
+- **Session model** — how long does one "conversation" last?
+- **Memory & state** — what carries across turns or sessions?
+- **Multi-item handling** — one thing at a time or many?
+- **When things go wrong** — clarify first, best-guess + flag, show the attempt, retry?
 
-### Round 2 — How users interact (4 questions)
+Skip any question Round 1 already answered.
 
-4. Read Round 1 answers carefully. You now know the idea category (data analysis, email triage, code review, etc.). Write ALL questions and ALL options for this round as if you are a product designer who has used tools exactly like this.
-5. Load `clarify`. Ask **4 questions**, all `multiSelect: true`. Cover these four interaction-model dimensions — all options must be specific to the idea:
+### Round 3 — Feature depth (4 questions, all multiSelect)
 
-   - **Session model** — how long does one "conversation" last? E.g. for a data analyst agent: "I upload a file, ask one question, done", "I upload once and ask many questions in a session", "I return to the same dataset across multiple days", "It runs automatically and I review results".
-   - **Memory & state** — what should carry across turns or sessions? E.g. for a data analyst agent: "The conversation history (what I asked before)", "The uploaded datasets stay loaded", "Derived/cleaned datasets I created during the session", "A global context I can annotate (column descriptions, business rules)", "Nothing — fresh start every time".
-   - **Multi-item handling** — does it work with one thing at a time or many? E.g. for a data analyst agent: "One file at a time", "Multiple files I can join or compare", "A folder of related files treated as one dataset", "It picks the right file automatically from my library".
-   - **When things go wrong** — what should it do when it can't answer confidently? E.g. for a data analyst agent: "Ask me a clarifying question before running", "Give me its best guess and flag the uncertainty", "Show me what it tried and where it got stuck", "Retry with a different approach automatically".
+What makes it genuinely powerful vs a toy — all options idea-specific concrete features:
 
-   **Skip any question if Round 1 already answered it.** Do not ask for information you already have.
+- **Analysis / reasoning depth** — one LLM call? multi-step? iterate-until-right? plan-first?
+- **Output richness** — text, charts, tables, exportable files?
+- **Proactive intelligence** — only answers? suggests follow-ups? flags anomalies?
+- **Integration surface** — standalone, saves back, exports, embeds?
 
----
+### Round 4 — Constraints & scale (3 questions, all multiSelect)
 
-### Round 3 — Feature depth (4 questions)
+- **Data scale & performance** — how much data, how fast?
+- **Privacy & data residency** — local-only, rows-never-leave, cloud-fine, compliance?
+- **Reliability bar** — prototype, production, audit trail, access control?
 
-6. Read Rounds 1–2. You now know what the agent processes and how users interact with it. This round uncovers what makes the agent genuinely powerful vs. a toy. Write ALL options as idea-specific concrete features — not abstract categories.
-7. Load `clarify`. Ask **4 questions**, all `multiSelect: true`. Cover these four feature-depth dimensions:
+### Round 5 — Observability, trust & transparency (3–4 questions, all multiSelect)
 
-   - **Analysis / reasoning depth** — how hard should it work on each request? E.g. for a data analyst agent: "Fast answer — one LLM call, no iteration", "Multi-step reasoning — tries code, sees result, tries again", "Iterative until it finds the right answer (up to N steps)", "Plans a full analysis strategy before executing".
-   - **Output richness** — what forms should results take? E.g. for a data analyst agent: "Plain text answer with key numbers", "Interactive charts I can zoom and filter", "A summary table alongside the prose", "An exportable file (CSV, cleaned dataset, report)".
-   - **Proactive intelligence** — should it do anything without being asked? E.g. for a data analyst agent: "No — only answers what I ask", "Suggests 2–3 follow-up questions after each answer", "Flags anomalies or data-quality issues it notices while answering", "Auto-profiles a new dataset when I upload it".
-   - **Integration surface** — what else does it connect to or produce for? E.g. for a data analyst agent: "Standalone — no integrations needed", "Saves derived/cleaned datasets back to my library", "Exports to Slack / email / dashboard", "Embeds in our existing data tool".
-
-   **Skip any question if already answered.** Do not repeat covered ground.
-
----
-
-### Round 4 — Constraints & scale (3 questions)
-
-8. Read Rounds 1–3. This round surfaces hard constraints that would invalidate a design decision if missed. Write ALL options as specific, concrete limits — not vague categories.
-9. Load `clarify`. Ask **3 questions**, all `multiSelect: true`:
-
-   - **Data scale & performance** — how much data and how fast? E.g. for a data analyst agent: "Small files, a few MB, latency doesn't matter", "Up to 100 MB CSVs, answer in under 30s", "Millions of rows — needs sampling or streaming", "Multiple users querying concurrently".
-   - **Privacy & data residency** — where can data go? Options: "Everything must stay on my machine / our server (no cloud LLM API calls)", "LLM API calls are OK but raw data rows must never leave", "Cloud storage and APIs are fine", "We have compliance requirements (SOC 2, GDPR, HIPAA)".
-   - **Reliability bar** — what's the quality/trust bar? Options: "Experimental / prototype — imperfect answers OK", "Production-ready — I'll act on the answers", "Needs an audit trail of what the agent did and why", "Needs access control — different users see different data".
-
----
-
-### Round 5 — Observability, trust & transparency (3–4 questions)
-
-10. Read Rounds 1–4. This round covers what users need to see in order to trust and debug the agent — often skipped but critical for agents that users depend on.
-11. Load `clarify`. Ask **3–4 questions**, all `multiSelect: true`:
-
-    - **Reasoning visibility** — should users see how the agent reached its answer? E.g. for a data analyst agent: "No — just show me the answer", "Show me the code it ran (collapsible)", "Show me each step — what it tried, what failed, what worked", "Show me the full reasoning chain".
-    - **Usage & cost awareness** — should users know what the agent is spending? E.g. for a data analyst agent: "No — hide this", "Show tokens used per query", "Show estimated cost per query", "Show a running daily total".
-    - **Agent health & progress** — should users see the agent working? E.g. for a data analyst agent: "Just a spinner is fine", "Show a step counter (Step 3 of 6)", "Show a progress bar + elapsed timer", "Stream partial answers as they arrive".
-    - **Logging & audit** — how much should be recorded server-side? E.g.: "Nothing persistent", "Log each query and answer to a file", "Store full run history in the database with timestamps", "Full audit trail: who asked what, what code ran, what result was stored".
-
----
+- **Reasoning visibility** — answer only, show the code, show every step, full chain?
+- **Usage & cost awareness** — hidden, tokens, cost per query, running total?
+- **Agent health & progress** — spinner, step counter, progress + timer, streaming?
+- **Logging & audit** — nothing, per-query log, full DB history, full audit trail?
 
 ### Additional product rounds (as many as needed)
 
-After Round 5, check: *"Is there any dimension that would force spec-writer to guess?"* If yes, write another product round on that exact dimension. Common dimensions that spill over:
+Common spill-over dimensions: edge cases & error handling; collaboration & sharing; output
+lifecycle (ephemeral vs persistent); onboarding & defaults; any remaining trade-off that
+would produce a meaningfully different Phase 1. Keep going until the brief would let
+spec-writer fill every capability file without a single guess.
 
-- **Edge cases & error handling** — what happens when input is malformed, the LLM is wrong, an integration fails, or the user asks something outside scope?
-- **Collaboration & sharing** — single user, shared team workspace, or multi-tenant with isolation?
-- **Output lifecycle** — are results ephemeral (session-only) or persistent (saved, versioned, exportable)?
-- **Onboarding & defaults** — first-run experience, example data, guided tours, sensible defaults vs. full configuration?
-- **Specific feature trade-offs** — any remaining capability choice (e.g. "auto-profile on upload or on demand?", "clarification gate before every query or only on ambiguity?") that would produce a meaningfully different Phase 1.
+### Technical round — always last (3–4 questions)
 
-Keep going until the brief you'll write in the synthesis step would let spec-writer fill every capability file without a single guess.
+- **LLM provider** *(single-select)* — **Anthropic**, **Gemini**, **OpenRouter (any
+  model)**, **Other / self-hosted**. Drives which key the user sets. (The baseline's
+  provider layer supports all three out of the box.)
+- **Stack preference** — language, database? ("No preference" → the baseline stack: Python +
+  FastAPI + LangGraph + SQLite for local tools, PostgreSQL for production-grade — documented
+  as assumptions.)
+- **How will they access it?** — Web UI, CLI, REST API, scheduled job.
+- **One follow-up** only if something would force a mid-build pause.
 
----
+**API key** (the only manual user step). **`.env` is a secret-bearing file — Hermes's
+`read_file` tool hard-blocks it outright ("Access denied: ... secret-bearing environment
+file"). Never call `read_file` on `.env` — a live run hit this and, instead of working
+around it, asked the user to manually open the file and confirm, 10 minutes into intake.**
+Instead run a `terminal`/`execute_code` script that loads `.env` itself (`python-dotenv`,
+or `source .env` in bash) and prints ONLY a pass/fail signal — presence as a boolean for
+the chosen provider's var (`AGENT_ANTHROPIC_API_KEY`, `AGENT_GEMINI_API_KEY`,
+`AGENT_OPENROUTER_API_KEY`; for **Other**, ask which env var + base URL) — never the value
+itself. **Use an ABSOLUTE path to `.env`, never a relative one.** `execute_code` runs the
+script in its own sandboxed process, not the repo's working directory — `dotenv_values(".env")`
+resolves against the sandbox and silently reports MISSING even when the key is genuinely
+present in the repo (confirmed on a live run: the key was present, the relative-path script
+still said MISSING). Resolve the repo root first (e.g. from a known file's path, or have the
+`terminal` tool `pwd`/`git rev-parse --show-toplevel` and pass that in), then
+`dotenv_values(f"{repo_root}/.env")`. Present → **validate it works** in that same script: one minimal real API call
+(e.g. the provider's cheapest endpoint), printing only `OK` or the error type
+(`401`/`429`/`model_not_found`) — a key can be *present but dead* (revoked account, expired
+trial, dead model slug), and discovering that mid-build wastes a phase. Missing, or the test
+call fails → tell the user the specific reason and ask them to fix `.env` (from
+`.env.example`), then re-run the check. Never echo, print, or commit a key value.
 
-### Technical round — What do we need to build it? (3–4 questions, always last)
+**Synthesis brief**: 2–3 paragraphs covering: what the agent does and who uses it; the
+interaction model (session shape, memory, multi-item); key capabilities (depth, outputs,
+proactive behaviours, edge-case handling, integrations, observability); hard constraints
+(scale, privacy, reliability); stack + access model. Name the one core path for Phase 1
+explicitly. ("Just build it" → narrow MVP, baseline defaults, documented as assumptions.)
 
-Read all prior rounds. Now ask the **technical build questions** — only genuine blockers, 3–4 total:
-- **LLM provider** *(single-select)* — offer: **Anthropic (API key)**, **Gemini (API key)**, **OpenRouter (any model)**, **Other / self-hosted**. This drives which key the user sets.
-- **Stack preference** — language, database? ("No preference" → Python + SQLite defaults for local/prototype tools, PostgreSQL for production-grade, documented as assumptions.)
-- **How will they access it?** — Web UI in a browser, CLI in the terminal, REST API, scheduled/automated job. Drives whether to build a frontend.
-- **One follow-up** from prior rounds only if something would force a mid-build pause — skip if everything is clear.
+## Stage 2 — Design + scaffold (first phase only)
 
-**API key** (the only manual user step). Read `.env` and check whether the key for the chosen provider is already set (non-empty): `AGENT_ANTHROPIC_API_KEY`, `AGENT_GEMINI_API_KEY`, or `AGENT_OPENROUTER_API_KEY` (for **Other**, ask which env var + base URL). If present and non-empty, skip silently. Only if missing or empty, tell the user to set it in `.env` (from `.env.example`) and wait for confirmation. Never echo, print, paste, or commit a secret value.
+1. **DESIGN** — run the **spec-writer** role (delegate or inline) with the brief. It writes
+   the full spec: capabilities, `spec/architecture.md` (incl. `## Stack`), `spec/agent.md`
+   (the agent graph — REQUIRED when a framework is chosen; pick patterns from
+   `harness/patterns/agentic-ai.md`), and the phased plan in `spec/roadmap.md` (per phase:
+   Goal · independent slices · key files · the exact runnable Gate command · how the user
+   tests it). **Verify on handback**: no `<!-- FILL IN -->` left, every phase has a runnable
+   gate, `spec/agent.md` exists if a framework is chosen. Surface its `Assumed:` flags to
+   the user in your next message (don't wait on them).
+2. **SCAFFOLD** — you own git (`harness/rules/git.md`):
+   - **Clean-baseline precheck (do this FIRST).** A fresh build must start from untouched
+     boilerplate: confirm `spec/` still has `<!-- FILL IN -->` markers AND no app/agent
+     output dir already exists. If either is already populated, you are on a PRIOR build's
+     branch — STOP and confirm with the user before continuing. (A live run inherited an old
+     ASP.NET+MSSQL data-analyst spec this way and tried `dotnet`/Docker on a Python box.)
+   - `base=$(git rev-parse --abbrev-ref HEAD)` — capture `<base>` BEFORE branching; never
+     `git checkout main` first (you dogfood the harness version you are on).
+   - `name="feature/<slug>-$(date +%Y%m%d-%H%M)-v0.1"` — the date-time slug makes it unique.
+     Before creating it, `git ls-remote --heads origin "$name"`; if it somehow exists, bump
+     the timestamp. **Never `git checkout` an existing feature branch to build into** — that
+     imports the prior build's stack. Then `git checkout -b "$name"`.
+   - The baseline in `src/` IS the scaffold — generators extend it in place (rename the
+     capability slot, never copy beside it). Update `.env.example` for any new env vars.
+   - First commit + push, then open the PR immediately: `gh pr create --base "$base"` —
+     **never `--base main`**. `main` is boilerplate-only, ABSOLUTELY.
 
-**Synthesis brief**: write a **2–3 paragraph brief** covering: what the agent does and who uses it; the core interaction model (session shape, memory/state, multi-item handling); the key capabilities and features (analysis depth, output forms, proactive behaviours, edge-case handling, integrations, observability); the hard constraints (scale, privacy, reliability bar); and the technical stack and access model. Name the one core path for Phase 1 explicitly — the single most important thing a user does that proves the idea. ("Just build it" → narrow MVP, Python + SQLite defaults, documented as assumptions.)
+## Stage 3 — Build one phase (the loop)
 
-## Stage 2 — Design + scaffold + build Phase 1 (delegate)
+For the current phase (Phase 1 first; later phases on user approval):
 
-Invoke the **agent-builder** sub-agent once with the brief and the populated `.env`. Tell it to run, in order, and return the **Phase-1 test-handoff**:
+1. **Read the phase's slices** from `spec/roadmap.md`.
+2. **Implement each slice** via the **code-generator** role — delegate independent slices in
+   parallel (up to 3) when `delegate_task` works AND the LLM key is a paid/dedicated one;
+   otherwise inline, sequentially, one slice at a time. **On a shared/free key, prefer
+   sequential inline** — parallel fan-out multiplies 429s on one credential pool and stalls
+   the build (mining the prior runs showed ~14h cumulative blocked on pool exhaustion).
+   Verify each handback's CONTENT, not just its status — a worker can return
+   `status=completed` whose body is a rate-limit error; that slice is NOT done. Each slice = its surfaces + its tests, test-first. Tell each generator exactly
+   which files it owns; slices own disjoint paths.
+3. **Gate each slice as it lands** via the **qa-auditor** role (delegate or inline):
+   independent code review + run the slice's real gate (real LLM/API keys from `.env`, prod
+   DB driver) + read the actual output. BLOCKED → route the named finding back to the
+   generator role for that surface; loop until VERIFIED. Never start the next phase with a
+   BLOCKED slice.
+4. **Phase-level checks (once per phase, after slices aggregate):**
+   - **Boot gate**: start the app with the EXACT documented run command from the repo root
+     (pin the interpreter: `.venv/bin/python -m src` — never bare `python`; a shared agent
+     venv can shadow it). No ImportError/startup traceback. Green pytest does NOT prove
+     this — pytest's `sys.path` masks `src.`-import bugs.
+   - **Fresh-DB check**: if the schema changed this phase, `uv run alembic upgrade head`
+     (and `alembic current` shows a revision) — or, pre-migrations, delete/recreate the dev
+     SQLite file. A stale dev DB turns a green suite into a 500 on the live server.
+   - **Live smoke**: health + the phase's new endpoint(s) + the UI page served — real
+     responses read, not assumed.
+5. **Commit + push the phase** — stage the phase's files explicitly (never `git add -A`),
+   `git commit -m "phase-N: <desc>" && git push origin <branch>` as ONE atomic action.
+   Update the PR body (what this phase added, how to run, what's deferred). **Hard gate: a
+   phase isn't done until committed + pushed + PR current — do this BEFORE the handoff.**
 
-- **DESIGN** — spec-writer writes the full spec: vision/capabilities, `spec/architecture.md` (incl. the `## Stack` section), `spec/agent.md` (if a framework is chosen), and the phased plan in `spec/roadmap.md` under "## Phases of Development" (per phase: Goal · independent slices · key surfaces/files · the exact runnable Gate command · how the user tests it).
-- **SCAFFOLD** — branch `feature/<slug>-$(date +%Y%m%d-%H%M)-v0.1` (date-time slug keeps it unique), project dirs, `.env.example`, first commit + push, open the PR.
-- **BUILD PHASE 1** — fan out generators per independent slice in parallel, gate each slice with qa-auditor, then return the Phase-1 test-handoff and STOP.
+## Stage 4 — Human testing gate (you own the run)
 
-Relay only the hard blockers it escalates (e.g. a required key still missing from `.env`).
+**The user's ONLY jobs are: (a) put secrets in `.env`, (b) click around the running app.
+They never run a terminal command to test.** You own the server and the gate:
 
-## Stage 3 — Human testing gate (you own the human channel)
+1. **Launch the server yourself**: from the repo root, `.venv/bin/python -m src` using the
+   terminal tool's **background flag** (`background=true` / `run_in_background`) on a **free
+   port** (retry the next port if busy; export `PORT`). **Never a `&`-backgrounded command,
+   `nohup`, `setsid`, or `disown`** — Hermes hard-blocks those and points you to the
+   background flag; the readiness watch fires on the framework's startup line (e.g. uvicorn
+   "Application startup complete"). Then, in a FOLLOW-UP terminal call, health-check with
+   retry: `for i in {1..10}; do curl -sf localhost:$PORT/health && break || sleep 2; done`
+   (each terminal call starts fresh at repo root — use absolute paths, don't rely on a prior
+   `cd`). This curl/httpx smoke asserting response CONTENT is the gate of record; a browser
+   check is a bonus only when the browser tool is actually available. If it never responds →
+   BLOCKER: route to qa-auditor, fix, relaunch. **Never present a URL you haven't verified
+   live this session; never hand the user a command to run the server.**
+2. **Present phase release notes**: the ONE live URL; what was built this phase; what to
+   click/type; the expected result; which parts are clearly-labelled stubs vs real (a stub
+   must never read as a bug); what the next phase adds. No terminal commands in the handoff.
+3. **Ask via `clarify` — ALWAYS MULTI-SELECT, never a single verdict.** One option per
+   testable feature this phase shipped, plus "App didn't load / error" and "Nothing worked"
+   escapes. A multi-select tells you *which* parts passed in one answer. If `clarify` won't
+   load: plain text, one question at a time.
+4. **Route on the answer:**
+   - Didn't load → qa-auditor (boot failure) → fix → relaunch → re-present.
+   - Any negative → capture what they saw → run the **zero-shot-fix** procedure (you stay
+     the orchestrator; qa-auditor diagnoses + classifies SPEC-vs-CODE, the generator fixes,
+     scoped re-gate) → rebuild/restart → re-present. Loop until satisfied.
+   - All positive → *"Ready for Phase N+1?"* — on "one more thing first", route as negative;
+     on yes → Stage 3 for the next phase.
 
-Phase 1 is the smallest working win: real on the one core path, with clearly-labelled non-functional stubs for everything coming later. **Spoon-feed the user: the ONLY things they should ever do by hand are (a) put secrets in `.env` and (b) interact with the running app (click / chat). They must never run a terminal command to test.** You own the gate, the server lifecycle, and re-invocation:
+## The build journal (capture learnings as you go)
 
-1. **Launch the server** (you own this — agent-builder does NOT start it; sub-agent background processes are cleaned up on return). The handoff includes the project root path + run command. In order from the project root:
-   a. If the phase has a frontend slice: `cd frontend && npm run build && cd ..`
-   b. If the phase has migrations: `alembic upgrade head`
-   c. `venv/bin/python -m src` with `run_in_background: true`
-   d. Health-check with retry: `for i in {1..10}; do curl -sf http://localhost:8001/health && break || sleep 2; done` — wait for the server before presenting the gate. If it never responds → route immediately to qa-auditor (boot failure), do not present the URL.
-2. Load the question tool: `clarify` with query `select:clarify` (before asking). If it doesn't load, ask the gate questions in plain text one by one. If the user couldn't multi-select (or an answer is ambiguous), follow up per feature until you know exactly what worked and what didn't.
-3. Present the handoff as **phase release notes**: the live URL, what was built this phase, what to click / type / look at, the expected result, which parts are clearly-labelled stubs vs real (a stub must never read as a bug), and what the next phase adds. No run commands in the handoff — the app is already serving.
-4. Ask via `clarify` — **ALWAYS MULTI-SELECT, never a single-choice verdict.** One call, tick all that
-   apply, covering both load-state and a per-feature checklist derived from THIS phase's success criteria:
-   - *"Is the app loading at [URL]?"* → **"Yes, I can see it"** / **"No — error or blank page"**
-   - *"What worked?"* (multiSelect) → one option per testable feature the phase shipped (e.g.
-     **"Main view renders"** / **"Core action works"** / **"Output is correct"** / **"Feedback/hints work"** /
-     **"Streaming works"** / **"Reasoning/usage shown"**), plus a **"Nothing worked"** escape.
-   A multi-select checklist tells you *which* parts passed and *which* failed in one answer — a single
-   verdict throws that away. If "No — error" or "Nothing worked" is ticked, route to qa-auditor.
-5. Route on their answers:
-   - App didn't load → qa-auditor (boot failure), fix, re-present.
-   - Any negative verdict → capture what they saw, then delegate to **zero-shot-fix** — pass the user's description, the phase context, the live URL, and any qa-auditor diagnosis already in context (file:line + SPEC/CODE classification) so it can skip re-diagnosis. It owns diagnose → fix → verify → commit + push autonomously, using the **scoped gate** for small CODE fixes (qa-auditor verifies only the changed surface + a real-key smoke call — not the full suite/E2E). When it returns VERIFIED, rebuild + restart the running app and **re-present** the gate. Loop until satisfied.
-   - Positive only → **"Ready for Phase 2?"** → **"Yes, let's go"** / **"One more thing first"**. "One more thing" → route as negative above. "Yes" → Stage 4.
+Maintain **`NOTES.md` on the build's feature branch** throughout the run — commit it with
+each phase. It is a *harness-improvement log*, not an app changelog: record only friction
+with the harness or the runtime, each entry with symptom → what you did → the durable
+lesson. Typical entries: a `clarify` load failure, a delegated worker that returned early,
+a gate that passed for the wrong reason, a rule that fought you, a question the intake
+should have asked. Timestamp the run start (date + time) in the first entry — it lets the
+Hermes execution logs (`~/.hermes/logs/agent.log`, `~/.hermes/sessions/request_dump_*`)
+be sliced to this run afterwards.
 
-## Stage 4 — Per remaining phase (build → gate, repeat)
-
-For EVERY remaining phase boundary:
-
-1. Invoke **agent-builder** again — **one phase per invocation** — passing the user's feedback from the prior gate. It wires the relevant stubs into real functionality, fanning out generators per independent slice in parallel and gating each with qa-auditor, then returns that phase's test-handoff and STOPS.
-2. Run the **Stage 3 human testing gate** again for this phase.
-
-Repeat until no phases remain.
+After the run, durable generic lessons get distilled into
+`references/hermes-pitfalls.md` (and role files where they change behaviour) via a
+separate harness PR; the war-story details stay behind on the build branch's NOTES.md.
 
 ## Stage 5 — Ship + report
 
-1. **qa-auditor** — final whole-tree drift audit (CLEAN). Route any divergence per Stage 3 and re-verify.
-2. **agent-builder** — ensure the final state is pushed and the PR body is current.
-3. Summarize for the user: what was built, the **live URL it's running at** (keep it serving), what's deferred, and the PR link. Run commands belong in the README for the record — not as something the user must execute to test.
+1. **qa-auditor** — final whole-tree drift audit (CLEAN). Route divergences as in Stage 4.
+2. Ensure everything is pushed and the PR body is current. Never merge the PR yourself.
+3. Summarize: what was built, the **live URL it's serving at** (keep it running), what's
+   deferred, the PR link. Run commands live in the README for the record — not as something
+   the user must execute.
 
 ## Adding a capability to an existing agent
 
-If the spec is already filled in and the user is adding a capability: skip the scope intake; confirm the existing `.env` already holds the needed keys and ask only if the new capability requires a new provider/key. Tell agent-builder to run **spec-writer** (it owns architecture + roadmap now: add the capability to the spec and append an incremental phase to `spec/roadmap.md`, self-reviewed) → fan out the **frontend/backend generators** per slice → gate with qa-auditor. Then run the **human testing gate** on the new phase, same as any other.
+Spec already filled in → skip scope intake; confirm `.env` covers any new provider/key.
+spec-writer adds the capability + an incremental phase to `spec/roadmap.md` (self-reviewed)
+→ Stage 3 loop for that phase → Stage 4 gate. Same rules, one phase.
+
+## Failure modes (each of these happened on a real run)
+
+- Waiting for a delegated worker that can never spawn (depth cap) instead of going inline.
+- Trusting a worker's "done" without checking the files / re-running the gate — workers
+  return early at ~95% routinely; the root finishes.
+- A worker (or you) launching the test server inside a delegate — it dies on return; only
+  the root serves.
+- Presenting the gate without a live, verified URL — bouncing an un-run app back to the
+  user as a question. The gate owns the run.
+- Bare `python`/`uvicorn` picking up the wrong venv → phantom `ModuleNotFoundError`. Always
+  `.venv/bin/python -m src`.
+- A stale dev DB (schema drifted since create_all) turning green tests into live 500s —
+  migrate or recreate before the boot gate.
+- Looping an LLM call per output line/token in generated code — one batched call per
+  artifact, split downstream (a per-line loop burned a real monthly spend cap).
+- Single-choice gate questions (throws away per-feature signal); dumping all intake
+  questions in one message when `clarify` is down.
+- Committing to `main`, a commit without a push, a push without a PR, `git add -A`, or
+  staging `.env`.
