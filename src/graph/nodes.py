@@ -1,6 +1,8 @@
 """Graph nodes — Phase 1 capability: analyze_data; Phase 2 adds optional MsSQL cache routing."""
 from __future__ import annotations
 
+import json
+
 from src.db.mssql import cache_get, cache_set, has_mssql, live_query
 from src.graph.state import AgentState
 from src.llm.client import LLMClient, load_prompt
@@ -9,15 +11,17 @@ from src.llm.providers.base import LLMError
 
 def _likely_sql_topic(instruction: str) -> bool:
     q = instruction.lower()
-    return any(k in q for k in ["total", "count", "sum", "average", "avg", "max", "min", "district", "station", "fir", "crime", "accused", "victim", "case"])
+    return any(k in q for k in ["total", "count", "sum", "average", "avg", "max", "min", "district", "station", "fir", "crime", "accused", "victim", "case", "mssql"])
 
 
 def analyze_data(state: AgentState) -> AgentState:
     try:
         use_mssql = bool(state.get("use_mssql")) and has_mssql()
+        instruction = state.get("instruction", "") or ""
+        content = state["input_text"]
         probe_sql = (
             "SELECT TOP 10 * FROM sys.tables"
-            if use_mssql and _likely_sql_topic(state.get("instruction", ""))
+            if use_mssql and _likely_sql_topic(instruction)
             else None
         )
         cache_hit = False
@@ -31,18 +35,18 @@ def analyze_data(state: AgentState) -> AgentState:
             if cached is not None:
                 cache_hit = True
                 return {
-                    "output_text": cached["output_text"],
+                    "output_text": cached.get("output_text", ""),
                     "provider": cached.get("provider", ""),
                     "model": cached.get("model", ""),
                     "file_count": int(state.get("file_count") or 0),
                     "cache_hit": cache_hit,
                     "query_hash": query_hash,
                     "error": None,
+                    "status": "completed",
                 }
 
         client = LLMClient()
         system = load_prompt("analyze")
-        content = state["input_text"]
         if probe_sql:
             try:
                 live_rows = live_query(probe_sql)
@@ -67,9 +71,10 @@ def analyze_data(state: AgentState) -> AgentState:
             "cache_hit": cache_hit,
             "query_hash": query_hash,
             "error": None,
+            "status": "completed",
         }
     except LLMError as exc:
-        return {"error": str(exc)}
+        return {"error": str(exc), "status": "failed"}
 
 
 def handle_error(state: AgentState) -> AgentState:

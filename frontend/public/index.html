@@ -16,7 +16,7 @@
 
     <section class="card">
       <h2>Investigative data analyst</h2>
-      <p class="hint">Upload up to 12 CSV files, optionally enable MsSQL cache mode, ask a question, and receive a grounded insight.</p>
+      <p class="hint">Upload 1–12 CSV files, optionally enable MsSQL cache mode, ask a question, get an insight + chart.</p>
 
       <div class="form">
         <div class="field">
@@ -24,7 +24,7 @@
           <input id="files" type="file" accept=".csv,text/csv" multiple />
         </div>
 
-        <div class="field row">
+        <div class="field">
           <label class="toggle">
             <input id="use-mssql" type="checkbox" />
             <span>Use MsSQL cache mode</span>
@@ -53,6 +53,24 @@
         </div>
         <p class="meta" id="result-meta"></p>
       </div>
+    </section>
+
+    <section class="card" id="history-card">
+      <h2>Run history</h2>
+      <div id="history-empty" class="hint">No runs yet. Run your first analysis above.</div>
+      <table id="history-table" hidden>
+        <thead>
+          <tr>
+            <th>Run</th>
+            <th>Time</th>
+            <th>Files</th>
+            <th>Cache</th>
+            <th>Status</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody id="history-body"></tbody>
+      </table>
     </section>
 
     <footer class="foot">

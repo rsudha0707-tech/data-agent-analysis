@@ -1,4 +1,4 @@
-// CrimAnalyze frontend — multi-file CSV upload + investigator question.
+// CrimAnalyze frontend — multi-file CSV upload + investigator question + cache telemetry.
 "use strict";
 
 const $ = (id) => document.getElementById(id);
@@ -63,6 +63,54 @@ function renderChart(spec) {
         legend: { display: false },
       },
     },
+  });
+}
+
+function appendHistory(run) {
+  const empty = $("history-empty");
+  const table = $("history-table");
+  if (empty) empty.hidden = true;
+  table.hidden = false;
+
+  const tbody = $("history-body");
+  const tr = document.createElement("tr");
+  const created = new Date().toLocaleString();
+  const cacheLabel =
+    typeof run.cache_hit === "boolean"
+      ? run.cache_hit
+        ? "hit"
+        : "miss"
+      : "n/a";
+  tr.innerHTML = `
+    <td><code>${run.run_id || "—"}</code></td>
+    <td>${created}</td>
+    <td>${run.file_count ?? "—"}</td>
+    <td>${cacheLabel}${run.query_hash ? ` · ${run.query_hash}` : ""}</td>
+    <td>
+      <span class="status-pill ${run.status === 'completed' ? 'ok' : 'bad'}">
+        ${run.status || "unknown"}
+      </span>
+    </td>
+    <td><button class="ghost" data-run="${run.run_id}">Open</button></td>
+  `;
+  tbody.prepend(tr);
+  tr.querySelector("button").addEventListener("click", async () => {
+    try {
+      const res = await fetch(`/runs/${run.run_id}`);
+      const body = await res.json();
+      if (!res.ok) throw new Error(body?.detail?.message || `HTTP ${res.status}`);
+      const data = body.data;
+      $("result").textContent = data.output_text || "";
+      $("result-meta").textContent = `run ${data.run_id} · ${data.provider || "?"} 
+… - ${data.model || "?"} · ${data.file_count || 0} file(s)`;
+      const spec = _tryParseChartSpec(data.output_text);
+      renderChart(spec);
+      $("result-wrap").hidden = false;
+      window.history.replaceState(null, "", `/app#run=${data.run_id}`);
+    } catch (err) {
+      $("error").textContent = err.message;
+      $("error").hidden = false;
+    }
   });
 }
 
@@ -134,6 +182,7 @@ async function runAnalyze() {
 
     const spec = _tryParseChartSpec(run.output_text);
     renderChart(spec);
+    appendHistory(run);
     wrap.hidden = false;
   } catch (err) {
     errBox.textContent = err.message;
