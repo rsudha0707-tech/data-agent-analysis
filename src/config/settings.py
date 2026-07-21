@@ -38,6 +38,9 @@ class Settings(BaseSettings):
 
     log_level: str = Field(default="INFO")
 
+    # Phase 2 — MsSQL federation
+    database_url_mssql: str = Field(default="")
+
     # ----- derived -----
     def resolve_provider(self) -> str:
         """The effective provider name, or ``"stub"`` when no key is present."""
