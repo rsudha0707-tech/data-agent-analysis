@@ -25,12 +25,16 @@ def _to_result(run: RunRow) -> RunResult:
         provider=run.provider,
         model=run.model,
         error_message=run.error_message,
+        file_count=getattr(run, "file_count", 0) or 0,
+        cache_hit=getattr(run, "cache_hit", None),
+        query_hash=getattr(run, "query_hash", None),
     )
 
 
 @router.post("/runs")
-async def create_run(
+def create_run(
     instruction: str = Form(default="Summarize the data and answer the question."),
+    use_mssql: bool = Form(default=False),
     files: List[UploadFile] = File(default=[]),
     session: Session = Depends(get_session),
 ) -> dict:
@@ -44,7 +48,7 @@ async def create_run(
     prepared_inputs: list[tuple[str, bytes]] = []
     total_bytes = 0
     for f in files:
-        raw = await f.read()
+        raw = f.file.read()
         total_bytes += len(raw)
         prepared_inputs.append((f.filename or "upload", raw))
     if total_bytes > 5_000_000:
@@ -55,7 +59,12 @@ async def create_run(
         [c for _, c in prepared_inputs],
     )
 
-    run_id = run_agent(input_text, instruction.strip(), file_count=file_count)
+    run_id = run_agent(
+        input_text,
+        instruction.strip(),
+        file_count=file_count,
+        use_mssql=use_mssql,
+    )
     run = session.get(RunRow, run_id)
     if run is None:  # pragma: no cover — write happened in run_agent
         raise api_error("run_not_found", f"run {run_id} vanished", 500)

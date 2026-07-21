@@ -1,10 +1,11 @@
-// CrimAnalyze frontend — multi-file CSV upload + officer question.
+// CrimAnalyze frontend — multi-file CSV upload + investigator question.
 "use strict";
 
 const $ = (id) => document.getElementById(id);
 
 async function loadHealth() {
   const badge = $("provider-badge");
+  const mssqlBadge = $("mssql-badge");
   try {
     const res = await fetch("/health");
     const body = await res.json();
@@ -15,10 +16,54 @@ async function loadHealth() {
     } else {
       badge.textContent = `${provider} · ${model}`;
     }
+    if (mssqlBadge) {
+      mssqlBadge.textContent = keyed ? "provider ready" : "provider missing";
+      mssqlBadge.classList.toggle("stub", !keyed);
+    }
   } catch {
     badge.textContent = "backend unreachable";
     badge.classList.add("stub");
+    if (mssqlBadge) mssqlBadge.classList.add("stub");
   }
+}
+
+function _tryParseChartSpec(outputText) {
+  if (!outputText || typeof outputText !== "string") return null;
+  try {
+    const candidate = outputText.match(/\{[\s\S]*"chart_spec"[\s\S]*\}/);
+    if (!candidate) return null;
+    return JSON.parse(candidate[0]);
+  } catch {
+    return null;
+  }
+}
+
+function renderChart(spec) {
+  if (!spec || typeof spec !== "object") return;
+  const wrap = $("chart-wrap");
+  const canvas = $("chart");
+  if (!wrap || !canvas || !window.Chart) return;
+  wrap.hidden = false;
+  if (canvas._chart) canvas._chart.destroy();
+  canvas._chart = new Chart(canvas, {
+    type: spec.type || "bar",
+    data: {
+      labels: spec.labels || [],
+      datasets: [
+        {
+          label: spec.label || "Value",
+          data: spec.values || [],
+        }
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+      },
+    },
+  });
 }
 
 async function runAnalyze() {
@@ -26,12 +71,15 @@ async function runAnalyze() {
   const status = $("status");
   const errBox = $("error");
   const wrap = $("result-wrap");
+  const chartWrap = $("chart-wrap");
 
   const files = ($("files").files || []);
   const instruction = $("instruction").value.trim();
+  const useMssql = Boolean($("use-mssql")?.checked);
 
   errBox.hidden = true;
   wrap.hidden = true;
+  if (chartWrap) chartWrap.hidden = true;
 
   if (!files.length) {
     errBox.textContent = "Upload at least one CSV file.";
@@ -56,6 +104,7 @@ async function runAnalyze() {
   try {
     const form = new FormData();
     form.append("instruction", instruction);
+    form.append("use_mssql", String(useMssql));
     for (const file of files) {
       form.append("files", file, file.name || "data.csv");
     }
@@ -75,8 +124,16 @@ async function runAnalyze() {
       throw new Error(run.error_message || "The agent run failed.");
     }
     $("result").textContent = run.output_text || "";
-    $("result-meta").textContent =
-      `run ${run.run_id} · ${run.provider} · ${run.model} · ${run.file_count} file(s)`;
+    const meta = [];
+    meta.push(`run ${run.run_id}`);
+    if (run.provider) meta.push(`${run.provider} · ${run.model}`);
+    if (typeof run.file_count !== "undefined") meta.push(`${run.file_count} file(s)`);
+    if (run.query_hash) meta.push(`hash ${run.query_hash}`);
+    if (typeof run.cache_hit === "boolean") meta.push(`cache ${run.cache_hit ? "hit" : "miss"}`);
+    $("result-meta").textContent = meta.join(" · ");
+
+    const spec = _tryParseChartSpec(run.output_text);
+    renderChart(spec);
     wrap.hidden = false;
   } catch (err) {
     errBox.textContent = err.message;

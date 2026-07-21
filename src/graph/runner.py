@@ -8,7 +8,13 @@ from src.graph.state import AgentState
 from src.observability.events import get_logger, log_span
 
 
-def run_agent(input_text: str, instruction: str, *, file_count: int = 0) -> str:
+def run_agent(
+    input_text: str,
+    instruction: str,
+    *,
+    file_count: int = 0,
+    use_mssql: bool = False,
+) -> str:
     log = get_logger("runner")
 
     with create_db_session() as session:
@@ -27,6 +33,9 @@ def run_agent(input_text: str, instruction: str, *, file_count: int = 0) -> str:
         "instruction": instruction,
         "error": None,
         "file_count": file_count,
+        "use_mssql": use_mssql,
+        "cache_hit": None,
+        "query_hash": None,
     }
     with log_span(log, "agent_run", run_id=run_id) as span:
         final: AgentState = agentic_ai.invoke(initial)
@@ -39,5 +48,8 @@ def run_agent(input_text: str, instruction: str, *, file_count: int = 0) -> str:
         run.provider = final.get("provider")
         run.model = final.get("model")
         run.error_message = final.get("error")
+        for key in ("file_count", "cache_hit", "query_hash"):
+            if key in final:
+                setattr(run, key, final[key])
 
     return run_id

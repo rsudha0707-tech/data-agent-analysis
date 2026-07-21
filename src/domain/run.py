@@ -10,6 +10,7 @@ class RunRequest(BaseModel):
         min_length=1,
         max_length=2_000,
     )
+    use_mssql: bool = Field(default=False)
 
 
 class RunResult(BaseModel):
@@ -20,3 +21,5 @@ class RunResult(BaseModel):
     model: str | None = None
     error_message: str | None = None
     file_count: int = 0
+    cache_hit: bool | None = None
+    query_hash: str | None = None

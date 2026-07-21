@@ -11,16 +11,24 @@
     <header class="topbar">
       <h1>CrimAnalyze</h1>
       <span id="provider-badge" class="badge" title="Active LLM provider">…</span>
+      <span id="mssql-badge" class="badge stub">MsSQL cache off</span>
     </header>
 
     <section class="card">
       <h2>Investigative data analyst</h2>
-      <p class="hint">Upload 1–12 CSV files, ask a natural-language question, and get an insight grounded in the data.</p>
+      <p class="hint">Upload up to 12 CSV files, optionally enable MsSQL cache mode, ask a question, and receive a grounded insight.</p>
 
       <div class="form">
         <div class="field">
           <label for="files">Dataset files (CSV)</label>
           <input id="files" type="file" accept=".csv,text/csv" multiple />
+        </div>
+
+        <div class="field row">
+          <label class="toggle">
+            <input id="use-mssql" type="checkbox" />
+            <span>Use MsSQL cache mode</span>
+          </label>
         </div>
 
         <div class="field">
@@ -40,6 +48,9 @@
       <div id="result-wrap" hidden>
         <h3>Result</h3>
         <pre id="result"></pre>
+        <div id="chart-wrap" hidden>
+          <canvas id="chart" width="720" height="360"></canvas>
+        </div>
         <p class="meta" id="result-meta"></p>
       </div>
     </section>
@@ -48,6 +59,7 @@
       <span>API docs at <a href="/docs">/docs</a> · health at <a href="/health">/health</a></span>
     </footer>
   </main>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
