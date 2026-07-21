@@ -35,22 +35,25 @@ def _cache_db_path() -> Path:
 
 def cache_get(question: str) -> dict[str, Any] | None:
     key = _query_hash(question)
-    with sqlite3.connect(_cache_db_path()) as conn:
-        conn.row_factory = sqlite3.Row
-        row = conn.execute(
-            "SELECT data, expires_at FROM cache WHERE key=?", (key,)
-        ).fetchone()
-        if not row:
-            return None
-        import datetime as dt
+    try:
+        with sqlite3.connect(_cache_db_path()) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT data, expires_at FROM cache WHERE key=?", (key,)
+            ).fetchone()
+            if not row:
+                return None
+            import datetime as dt
 
-        if row["expires_at"] and dt.datetime.now(
-            dt.timezone.utc
-        ) > dt.datetime.fromisoformat(row["expires_at"]):
-            conn.execute("DELETE FROM cache WHERE key=?", (key,))
-            conn.commit()
-            return None
-        return json.loads(row["data"])
+            if row["expires_at"] and dt.datetime.now(
+                dt.timezone.utc
+            ) > dt.datetime.fromisoformat(row["expires_at"]):
+                conn.execute("DELETE FROM cache WHERE key=?", (key,))
+                conn.commit()
+                return None
+            return json.loads(row["data"])
+    except sqlite3.OperationalError:
+        return None
 
 
 def cache_set(
