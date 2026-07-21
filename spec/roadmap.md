@@ -67,8 +67,8 @@ This agent replaces that workflow with one request: upload CSVs, ask in plain la
 
 - **Goal:** Add a read-only MsSQL federation layer that answers pre-registered query patterns with cached aggregates and falls back to live SQL only on cache miss.
 - **Independent slices (parallel build units):**
-  - `slice-a` (backend) — add MsSQL connector with query fingerprinting, local aggregate cache, and `cache_hit` telemetry on `RunRow`. deps: none.
+  - `slice-a` (backend) — add `AGENT_DATABASE_URL_MSSQL` connector with query fingerprinting, local aggregate cache, and `cache_hit`/`query_hash` telemetry in run output. deps: none.
   - `slice-b` (frontend) — add cache telemetry panel, DB state selector, and chart rendering via CDN. deps: none.
-- **Key surfaces / files:** `src/db/mssql.py`, `src/db/cache.py`, `src/graph/nodes.py`, `src/graph/state.py`, `src/api/runs.py`, `frontend/public/*`.
-- **Gate command:** `uv run pytest tests/integration/test_phase2_e2e.py -q`; asserts cache-hit ratio and stable latency under repeated identical questions.
-- **How the user tests it:** Configure `AGENT_DATABASE_URL_MSSQL` in `.env`, run the same question twice, verify second run hits cache and returns a prior `precision_match` tag.
+- **Key surfaces / files:** `src/db/mssql.py`, `src/graph/nodes.py`, `src/graph/state.py`, `src/graph/runner.py`, `src/api/runs.py`, `src/domain/run.py`, `src/config/settings.py`, `frontend/public/*`.
+- **Gate command:** `uv run pytest tests/integration/test_phase2_e2e.py -q`; asserts cache-hit behavior and stable latency under repeated identical questions.
+- **How the user tests it:** Configure `AGENT_DATABASE_URL_MSSQL` in `.env`, run the same question twice, verify second run hits cache and returns `cache_hit=true`.
