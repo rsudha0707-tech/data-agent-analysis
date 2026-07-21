@@ -1,13 +1,4 @@
-"""Graph nodes — THE CAPABILITY SLOT.
-
-``transform_text`` is the baseline capability: it applies the user's
-instruction to the input text with one batched LLM call. When building your
-agent, replace this node (and src/prompts/transform.md, and the frontend form)
-with your capability — the graph wiring, API, and DB stay as they are.
-
-Node contract: ``(state) -> partial state``; put failures in ``error`` so the
-error edge routes to handle_error — never raise through the graph.
-"""
+"""Graph nodes — Phase 1 capability: analyze_data."""
 from __future__ import annotations
 
 from src.graph.state import AgentState
@@ -15,24 +6,17 @@ from src.llm.client import LLMClient, load_prompt
 from src.llm.providers.base import LLMError
 
 
-def transform_text(state: AgentState) -> AgentState:
-    """Apply the instruction to the input text — ONE batched LLM call.
-
-    Never loop an LLM call per output line/token: generate the whole artifact
-    in one call and split downstream if needed (cost blows up otherwise).
-    """
+def analyze_data(state: AgentState) -> AgentState:
+    """Analyze uploaded CSVs using one real LLM call; input is a schema + row summaries."""
     try:
         client = LLMClient()
-        system = load_prompt("transform")
-        user = (
-            f"INSTRUCTION:\n{state['instruction']}\n\n"
-            f"TEXT:\n{state['input_text']}"
-        )
-        output = client.complete(system, user, max_tokens=2048)
+        system = load_prompt("analyze")
+        output = client.complete(system, state["input_text"], max_tokens=2048)
         return {
             "output_text": output,
             "provider": client.provider_name,
             "model": client.model,
+            "file_count": int(state.get("file_count") or 0),
             "error": None,
         }
     except LLMError as exc:
