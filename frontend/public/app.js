@@ -74,7 +74,7 @@ function appendHistory(run) {
 
   const tbody = $("history-body");
   const tr = document.createElement("tr");
-  const created = new Date().toLocaleString();
+  const created = new Date(run.created_at || Date.now()).toLocaleString();
   const cacheLabel =
     typeof run.cache_hit === "boolean"
       ? run.cache_hit
@@ -101,8 +101,7 @@ function appendHistory(run) {
       if (!res.ok) throw new Error(body?.detail?.message || `HTTP ${res.status}`);
       const data = body.data;
       $("result").textContent = data.output_text || "";
-      $("result-meta").textContent = `run ${data.run_id} · ${data.provider || "?"} 
-… - ${data.model || "?"} · ${data.file_count || 0} file(s)`;
+      $("result-meta").textContent = `run ${data.run_id} · ${data.provider || "?"} · ${data.model || "?"} · ${data.file_count || 0} file(s)`;
       const spec = _tryParseChartSpec(data.output_text);
       renderChart(spec);
       $("result-wrap").hidden = false;
@@ -112,6 +111,32 @@ function appendHistory(run) {
       $("error").hidden = false;
     }
   });
+}
+
+async function loadHistory() {
+  const empty = $("history-empty");
+  const table = $("history-table");
+  const tbody = $("history-body");
+  if (!empty || !table || !tbody) return;
+  table.hidden = true;
+  empty.hidden = false;
+  empty.textContent = "Loading runs...";
+  try {
+    const res = await fetch("/runs");
+    const body = await res.json();
+    if (!res.ok) throw new Error(body?.detail?.message || `HTTP ${res.status}`);
+    const runs = (body && body.data && Array.isArray(body.data)) ? body.data : [];
+    tbody.innerHTML = "";
+    if (!runs.length) {
+      table.hidden = true;
+      empty.textContent = "No runs yet. Run your first analysis above.";
+      return;
+    }
+    runs.forEach((run) => appendHistory(run));
+  } catch (err) {
+    table.hidden = true;
+    empty.textContent = `History unavailable: ${err.message}`;
+  }
 }
 
 async function runAnalyze() {
@@ -193,5 +218,6 @@ async function runAnalyze() {
   }
 }
 
+loadHistory();
 $("run-btn").addEventListener("click", runAnalyze);
 loadHealth();

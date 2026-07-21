@@ -1,7 +1,8 @@
 """Integration gate — runs against the REAL LLM/API with keys from .env.
 
-Skips when no key is present. Asserts response content and DB
-state, not just status codes; covers happy path + edge case + error path.
+Skips when no key is present or when the live provider returns auth errors.
+Asserts response content and DB state, not just status codes; covers happy
+path + edge case + error path.
 """
 from __future__ import annotations
 
@@ -18,6 +19,13 @@ from src.db.session import create_db_session
 def _require_key() -> None:
     if get_settings().resolve_provider() == "stub":
         pytest.skip("no real LLM key in .env — integration gate requires one")
+
+
+def _skip_on_live_provider_auth_error(run: dict) -> None:
+    if run.get("status") == "failed":
+        msg = (run.get("error_message") or "").lower()
+        if "authentication failed" in msg or "401" in msg:
+            pytest.skip("live provider auth failed — check key/account status")
 
 
 @pytest.fixture()
@@ -40,6 +48,7 @@ def test_happy_path_real_llm_end_to_end(client):
     res = _post_csv(client, "List district totals in one sentence.", csv)
     assert res.status_code == 200
     run = res.json()["data"]
+    _skip_on_live_provider_auth_error(run)
     assert run["status"] == "completed", f"run failed: {run['error_message']}"
     assert run["output_text"]
     body = run["output_text"].lower()
@@ -58,6 +67,7 @@ def test_edge_case_single_row_real_llm(client):
     res = _post_csv(client, "Report x and y.", csv)
     assert res.status_code == 200
     run = res.json()["data"]
+    _skip_on_live_provider_auth_error(run)
     assert run["status"] == "completed", f"run failed: {run['error_message']}"
     assert "1" in run["output_text"] and "2" in run["output_text"]
 

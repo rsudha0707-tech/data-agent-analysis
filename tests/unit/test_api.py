@@ -13,7 +13,7 @@ def test_health_reports_provider_presence_only(no_keys):
         assert res.status_code == 200
         data = res.json()["data"]
         assert data["status"] == "ok"
-        assert data["key_configured"] is False  # no_keys fixture
+        assert data["key_configured"] is False
         assert "api_key" not in res.text.lower()
 
 
@@ -30,22 +30,24 @@ def test_create_run_rejects_no_files(no_keys):
         assert res.status_code == 400
 
 
+def test_list_runs_returns_envelope(no_keys):
+    with _client() as client:
+        res = client.get("/runs")
+        assert res.status_code == 200
+        assert isinstance(res.json()["data"], list)
+
+
 def test_run_without_key_fails_gracefully(no_keys):
-    """No key → run persists as failed with an actionable message; no 500."""
     with _client() as client:
         from io import BytesIO
-
         res = client.post(
             "/runs",
-            data={
-                "instruction": "Summarize the data.",
-            },
+            data={"instruction": "Summarize the data."},
             files={"files": ("data.csv", BytesIO(b"a,b\n1,2\n"), "text/csv")},
         )
         assert res.status_code == 200
         run = res.json()["data"]
         assert run["status"] == "failed"
-        # If not stubbed, integration would execute; here just assert envelope exists
         assert "error_message" in run
 
 

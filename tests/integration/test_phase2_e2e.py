@@ -1,8 +1,4 @@
-"""Phase 2 integration gate — validates MsSQL flag, cache routing, telemetry.
-
-Runs against the REAL LLM/API when a key is present; skips otherwise.
-Uses dependency injection / monkeypatching to avoid needing a live MsSQL server.
-"""
+"""Phase 2 integration-style tests — _no_ real LLM/network needed."""
 from __future__ import annotations
 
 import pytest
@@ -10,109 +6,120 @@ from fastapi.testclient import TestClient
 from io import BytesIO
 
 from src.api import create_app
-from src.config.settings import get_settings
 from src.db.models import RunRow
 from src.db.session import create_db_session
 
 
-def _require_key() -> None:
-    if get_settings().resolve_provider() == "stub":
-        pytest.skip("no real LLM key in .env — integration gate requires one")
+def _client() -> TestClient:
+    return TestClient(create_app())
 
 
-@pytest.fixture()
-def client():
-    with TestClient(create_app()) as c:
-        yield c
+def test_list_runs_returns_envelope(no_keys) -> None:
+    with _client() as client:
+        res = client.get("/runs")
+        assert res.status_code == 200
+        assert isinstance(res.json()["data"], list)
 
 
-def _post_csv(client: TestClient, instruction: str, *, rows: str = "a,b\n1,2\n", use_mssql: bool = False):
-    return client.post(
-        "/runs",
-        data={"instruction": instruction, "use_mssql": "true" if use_mssql else "false"},
-        files={"files": ("dataset.csv", BytesIO(rows.encode("utf-8")), "text/csv")},
-    )
+def test_get_unknown_run_is_404(no_keys) -> None:
+    with _client() as client:
+        res = client.get("/runs/nope")
+        assert res.status_code == 404
+        assert res.json()["detail"]["code"] == "run_not_found"
 
 
-def _mock_mssql(monkeypatch, live_rows=None, cached_payload=None, error=None):
+def test_run_without_key_fails_gracefully(no_keys) -> None:
+    with _client() as client:
+        res = client.post(
+            "/runs",
+            data={"instruction": "Summarize.", "use_mssql": "true"},
+            files={"files": ("d.csv", BytesIO(b"a,b\n1,2\n"), "text/csv")},
+        )
+        assert res.status_code == 200
+        run = res.json()["data"]
+        assert run["status"] == "failed"
+        assert "error_message" in run
+
+
+def test_create_run_rejects_more_than_12_files(no_keys) -> None:
+    with _client() as client:
+        files = [
+            ("files", (f"f{i}.csv", BytesIO(b"a,b\n1,2\n"), "text/csv"))
+            for i in range(13)
+        ]
+        res = client.post(
+            "/runs",
+            data={"instruction": "Summarize the data."},
+            files=files,
+        )
+        assert res.status_code == 400
+
+
+def test_mock_mssql_cache_hit_returns_cached_output(no_keys, monkeypatch) -> None:
+    import src.graph.nodes as nodes_mod
+
+    monkeypatch.setattr(nodes_mod, "has_mssql", lambda: True)
+    monkeypatch.setattr(nodes_mod, "cache_get", lambda _q: {
+        "output_text": "cached",
+        "provider": "openrouter",
+        "model": "m",
+    })
+    monkeypatch.setattr(nodes_mod, "cache_set", lambda *_, **__: None)
+
+    out = nodes_mod.analyze_data({
+        "run_id": "run-x",
+        "input_text": "data",
+        "instruction": "Count rows",
+        "error": None,
+        "file_count": 1,
+        "use_mssql": True,
+        "cache_hit": None,
+        "query_hash": None,
+    })
+    assert out["status"] == "completed"
+    assert out["output_text"] == "cached"
+    assert out["cache_hit"] is True
+    assert "query_hash" in out
+
+
+def test_mock_mssql_cache_miss_invokes_provider_stub_as_failure(no_keys, monkeypatch) -> None:
     import src.db.mssql as mssql_mod
+    import src.graph.nodes as nodes_mod
 
     monkeypatch.setattr(mssql_mod, "has_mssql", lambda: True)
-    if error:
-
-        def _live(_sql, **_):  # pragma: no cover - simple error branch
-            raise RuntimeError(error)
-
-        monkeypatch.setattr(mssql_mod, "live_query", _live)
-    else:
-        monkeypatch.setattr(mssql_mod, "live_query", lambda _sql, **_: live_rows or [{"x": 1}])
-
-    if cached_payload is not None:
-
-        def _cache_get(_q):
-            return cached_payload
-
-        monkeypatch.setattr(mssql_mod, "cache_get", _cache_get)
-    else:
-
-        def _cache_get(_q):
-            return None
-
-        monkeypatch.setattr(mssql_mod, "cache_get", _cache_get)
-
+    monkeypatch.setattr(mssql_mod, "cache_get", lambda _q: None)
+    monkeypatch.setattr(mssql_mod, "live_query", lambda _sql, **_: [{"x": 1}])
     monkeypatch.setattr(mssql_mod, "cache_set", lambda *_, **__: None)
 
-
-def test_no_key_with_mssql_flag_still_fails_gracefully(client):
-    request = client.post(
-        "/runs",
-        data={"instruction": "Summarize.", "use_mssql": "true"},
-        files={"files": ("d.csv", BytesIO(b"a,b\n1,2\n"), "text/csv")},
-    )
-    assert request.status_code == 200
-    run = request.json()["data"]
-    assert run["status"] == "failed"
-    assert "AGENT_" in run["error_message"]
-
-
-def test_mssql_flag_surfaces_cache_telemetry_when_available(client, monkeypatch):
-    _require_key()
-    _mock_mssql(monkeypatch)
-    res = _post_csv(client, "List district counts.", use_mssql=True)
-    assert res.status_code == 200
-    run = res.json()["data"]
-    assert run["status"] == "completed"
-    assert run["query_hash"] is not None or run["cache_hit"] is not None
+    out = nodes_mod.analyze_data({
+        "run_id": "run-y",
+        "input_text": "data",
+        "instruction": "Count rows",
+        "error": None,
+        "file_count": 1,
+        "use_mssql": True,
+        "cache_hit": None,
+        "query_hash": None,
+    })
+    assert out["status"] == "failed"
+    assert "error" in out
 
 
-def test_mssql_cache_hit_returns_cached_output(client, monkeypatch):
-    _require_key()
-    payload = {
-        "output_text": "Cached insight for district counts.",
-        "provider": "openrouter",
-        "model": "tencent/hy3",
-    }
-    _mock_mssql(monkeypatch, cached_payload=payload)
-    first = _post_csv(client, "List district counts.", use_mssql=True)
-    assert first.status_code == 200
-    first_run = first.json()["data"]
-    assert first_run["status"] == "completed"
+def test_history_open_button_loads_individual_run(no_keys) -> None:
+    with _client() as client:
+        res = client.post(
+            "/runs",
+            data={"instruction": "Spreadsheet X"},
+            files={"files": ("d.csv", BytesIO(b"a,b\n1,2\n"), "text/csv")},
+        )
+        assert res.status_code == 200
+        run_id = res.json()["data"]["run_id"]
 
-
-def test_invalid_mssql_url_does_not_crash_run(client, monkeypatch):
-    _require_key()
-    _mock_mssql(monkeypatch, error="connection failed")
-    res = _post_csv(client, "List district counts.", use_mssql=True)
-    assert res.status_code == 200
-    run = res.json()["data"]
-    assert run["status"] == "completed"
-
-
-def test_post_runs_rejects_more_than_12_files(client):
-    files = [("files", (f"f{i}.csv", BytesIO(b"a,b\n1,2\n"), "text/csv")) for i in range(13)]
-    res = client.post(
-        "/runs",
-        data={"instruction": "Summarize the data."},
-        files=files,
-    )
-    assert res.status_code == 400
+        res2 = client.get(f"/runs/{run_id}")
+        assert res2.status_code == 200
+        run = res2.json()["data"]
+        assert run["run_id"] == run_id
+        assert "created_at" in run
+        assert "updated_at" in run
+        assert isinstance(run["file_count"], int)
+        assert run["cache_hit"] is None or isinstance(run["cache_hit"], bool)

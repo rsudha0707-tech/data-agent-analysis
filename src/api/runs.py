@@ -79,3 +79,14 @@ def get_run(run_id: str, session: Session = Depends(get_session)) -> dict:
     if run is None:
         raise api_error("run_not_found", f"no run with id {run_id}", 404)
     return ok(_to_result(run).model_dump())
+
+
+@router.get("/runs")
+def list_runs(session: Session = Depends(get_session)) -> dict:
+    runs = (
+        session.query(RunRow)
+        .order_by(RunRow.updated_at.desc())
+        .limit(50)
+        .all()
+    )
+    return ok([_to_result(run).model_dump() for run in runs])
