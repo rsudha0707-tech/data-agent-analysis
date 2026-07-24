@@ -24,10 +24,44 @@ def test_get_unknown_run_is_404():
         assert res.json()["detail"]["code"] == "run_not_found"
 
 
-def test_create_run_rejects_no_files(no_keys):
+def test_create_run_rejects_more_than_12_files(no_keys):
     with _client() as client:
-        res = client.post("/runs", data={"instruction": "upper"})
+        from io import BytesIO
+
+        files = [
+            ("files", (f"f{i}.csv", BytesIO(b"a,b\n1,2\n"), "text/csv"))
+            for i in range(13)
+        ]
+        res = client.post(
+            "/runs",
+            data={"instruction": "Summarize the data."},
+            files=files,
+        )
         assert res.status_code == 400
+
+
+def test_create_run_accepts_json_payload_without_files(no_keys, monkeypatch):
+    import src.agents.runner as agent_runner
+    from src.llm.providers.base import LLMProvider
+
+    class FakeProvider(LLMProvider):
+        name = "test"
+        model = "test-model"
+
+        def complete(self, system: str, user: str, *, max_tokens: int = 1024) -> str:
+            return '{"insight": "ok", "table_summary": "ok", "chart_spec": {"type": "bar", "x": "a", "y": "b", "label": "Fake"}}'
+
+    monkeypatch.setattr(agent_runner, "create_llm_provider", lambda: FakeProvider())
+
+    with _client() as client:
+        res = client.post(
+            "/runs",
+            json={"instruction": "Draft a finding", "extra": "ok"},
+        )
+        assert res.status_code == 200
+        run = res.json()["data"]
+        assert run["status"] == "completed"
+        assert run["output_text"]
 
 
 def test_list_runs_returns_envelope(no_keys):

@@ -24,8 +24,8 @@ def _require_key() -> None:
 def _skip_on_live_provider_auth_error(run: dict) -> None:
     if run.get("status") == "failed":
         msg = (run.get("error_message") or "").lower()
-        if "authentication failed" in msg or "401" in msg:
-            pytest.skip("live provider auth failed — check key/account status")
+        if any(token in msg for token in ("authentication failed", "401", "rate limit", "quota exhausted", "429")):
+            pytest.skip("live provider auth/quota failed — check key/account status")
 
 
 @pytest.fixture()
