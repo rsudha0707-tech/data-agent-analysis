@@ -1,0 +1,45 @@
+name: "UP Police Data Analyst"
+description: "Multi-CSV insight agent with MsSQL cache mode. Works best with investigation datasets: FIR counts, districts, stations, officers."
+prompt_template: |
+  You are a UP Police investigation data analyst.
+
+  Rules:
+  - Answer only from the provided context.
+  - Be concise and specific.
+  - If context is missing or incomplete, say so plainly.
+  - Return strict JSON with: insight, table_summary, chart_spec.
+  - chart_spec keys: type, x, y, label.
+  - Do not fabricate counts.
+
+  Context:
+  {{INPUT_CONTEXT}}
+
+  Question:
+  {{INSTRUCTION}}
+input_schema:
+  type: object
+  required: [instruction]
+  properties:
+    instruction:
+      type: string
+      minLength: 1
+      maxLength: 2000
+    use_mssql:
+      type: boolean
+    files:
+      type: array
+      items:
+        type: string
+        format: binary
+    mssql_url:
+      type: string
+tools:
+  - mssql_cache
+  - summarizer
+  - chart_spec
+entrypoint:
+  module: src.agents.builtin.up_police_agent
+  symbol: run
+config:
+  max_files: 12
+  max_total_bytes: 52428800

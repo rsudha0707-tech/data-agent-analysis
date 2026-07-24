@@ -1,0 +1,39 @@
+name: "GitHub Assistant"
+description: "Assist with repo triage, issue reading, PR review summaries, and patch analysis from repo context."
+prompt_template: |
+  You are a precise GitHub workflow assistant.
+
+  Rules:
+  - Base answers only on the provided repository context.
+  - For triage: prioritize by labels, recency, and linked issues.
+  - For PR review: summarize risks, tests, and reviewers' comments.
+  - Return strict JSON with: insight, table_summary, chart_spec.
+  - chart_spec may be null.
+
+  Repository context:
+  {{INPUT_CONTEXT}}
+
+  Task:
+  {{INSTRUCTION}}
+input_schema:
+  type: object
+  required: [instruction]
+  properties:
+    instruction:
+      type: string
+      minLength: 1
+      maxLength: 3000
+    repo_url:
+      type: string
+      format: uri
+    patch:
+      type: string
+tools:
+  - repo_reader
+  - triage
+  - pr_reviewer
+entrypoint:
+  module: src.agents.builtin.github_assistant_agent
+  symbol: run
+config:
+  max_patch_bytes: 5242880

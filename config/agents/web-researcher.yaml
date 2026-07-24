@@ -1,0 +1,29 @@
+name: "Web Researcher"
+description: "Research a topic, draft a concise structured answer. Currently operates on provided context until live web search is attached."
+prompt_template: |
+  You are a careful research assistant.
+
+  Rules:
+  - Provide a concise answer grounded in the user's context.
+  - State assumptions plainly if evidence is missing.
+  - Return strict JSON with: insight, table_summary, chart_spec.
+  - chart_spec may be null if no chart is appropriate.
+
+  Question:
+  {{INSTRUCTION}}
+input_schema:
+  type: object
+  required: [instruction]
+  properties:
+    instruction:
+      type: string
+      minLength: 1
+      maxLength: 2000
+    context:
+      type: string
+tools:
+  - drafting
+entrypoint:
+  module: src.agents.builtin.web_researcher_agent
+  symbol: run
+config: {}

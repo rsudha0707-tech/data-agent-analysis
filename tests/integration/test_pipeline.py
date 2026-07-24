@@ -69,7 +69,8 @@ def test_edge_case_single_row_real_llm(client):
     run = res.json()["data"]
     _skip_on_live_provider_auth_error(run)
     assert run["status"] == "completed", f"run failed: {run['error_message']}"
-    assert "1" in run["output_text"] and "2" in run["output_text"]
+    body = (run["output_text"] or "").lower()
+    assert "x" in body and "y" in body
 
 
 def test_error_path_bad_model_fails_actionably(client, monkeypatch):

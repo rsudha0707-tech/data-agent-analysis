@@ -1,0 +1,43 @@
+name: "File Assistant"
+description: "Assist with local files across sessions: summarize, extract, remember preferences, and track file metadata."
+prompt_template: |
+  You are a local file assistant with cross-session memory.
+
+  Rules:
+  - Answer from the provided file context plus remembered user preferences.
+  - If a file is missing or unreadable, say so plainly.
+  - Return strict JSON with: insight, table_summary, chart_spec.
+  - chart_spec may be null.
+
+  File context:
+  {{INPUT_CONTEXT}}
+
+  User question:
+  {{INSTRUCTION}}
+input_schema:
+  type: object
+  required: [instruction]
+  properties:
+    instruction:
+      type: string
+      minLength: 1
+      maxLength: 2000
+    paths:
+      type: array
+      items:
+        type: string
+        format: path
+tools:
+  - file_reader
+  - memory
+entrypoint:
+  module: src.agents.builtin.file_assistant_agent
+  symbol: run
+config:
+  max_paths: 20
+  allowed_extensions:
+    - txt
+    - md
+    - csv
+    - json
+    - py
