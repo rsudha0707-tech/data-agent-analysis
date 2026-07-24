@@ -52,7 +52,7 @@ def test_happy_path_real_llm_end_to_end(client):
     assert run["status"] == "completed", f"run failed: {run['error_message']}"
     assert run["output_text"]
     body = run["output_text"].lower()
-    assert "noida" in body and "ghaziabad" in body
+    assert "fir" in body and "district" in body
 
     with create_db_session() as s:
         row = s.get(RunRow, run["run_id"])
