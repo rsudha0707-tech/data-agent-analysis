@@ -66,6 +66,19 @@ function renderChart(spec) {
   });
 }
 
+function _displayResult(outputText, provider, model, fileCount, cacheHit, queryHash) {
+  $({
+    "result": "raw-output",      /* fallback to raw text if structured view is unavailable */
+  });
+  $("result").textContent = run.insight || run.output_text || "";
+  const meta = ["run output"];
+  if (provider) meta.push(`${provider} · ${model}`);
+  if (typeof file_count !== "undefined") meta.push(`${file_count || 0} file(s)`);
+  if (query_hash) meta.push(`hash ${query_hash}`);
+  if (typeof cache_hit === "boolean") meta.push(`cache ${cache_hit ? "hit" : "miss"}`);
+  $("result-meta").textContent = meta.join(" · ");
+}
+
 function appendHistory(run) {
   const empty = $("history-empty");
   const table = $("history-table");

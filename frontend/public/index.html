@@ -47,10 +47,20 @@
 
       <div id="result-wrap" hidden>
         <h3>Result</h3>
-        <pre id="result"></pre>
-        <div id="chart-wrap" hidden>
-          <canvas id="chart" width="720" height="360"></canvas>
+        <div id="structured-result" hidden>
+          <div class="result-section">
+            <h4>Insight</h4>
+            <p id="insight-text"></p>
+          </div>
+          <div class="result-section">
+            <h4>Table summary</h4>
+            <pre id="table-summary-text"></pre>
+          </div>
+          <div id="chart-wrap" hidden>
+            <canvas id="chart" width="720" height="360"></canvas>
+          </div>
         </div>
+        <pre id="result"></pre>
         <p class="meta" id="result-meta"></p>
       </div>
     </section>
